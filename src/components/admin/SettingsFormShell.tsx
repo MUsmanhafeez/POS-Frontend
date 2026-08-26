@@ -1,0 +1,110 @@
+'use client';
+
+import { FormEvent, useEffect, useState } from 'react';
+import { Save, RotateCcw } from 'lucide-react';
+import api from '@/lib/api';
+import { Field } from '@/components/ui';
+import { btnPrimary, btnSecondary, fieldClass } from '@/lib/ui';
+
+type Props = {
+  section: string;
+  title: string;
+  icon?: React.ReactNode;
+  description?: string;
+  defaults: Record<string, unknown>;
+  children: (args: {
+    form: Record<string, unknown>;
+    set: (key: string, value: unknown) => void;
+  }) => React.ReactNode;
+  banner?: React.ReactNode;
+  showReset?: boolean;
+};
+
+export default function SettingsFormShell({
+  section,
+  title,
+  icon,
+  description,
+  defaults,
+  children,
+  banner,
+  showReset,
+}: Props) {
+  const [form, setForm] = useState<Record<string, unknown>>(defaults);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    api
+      .get(`/settings/${section}`)
+      .then((r) => setForm({ ...defaults, ...(r.data.body || {}) }))
+      .catch(() => setForm(defaults));
+  }, [section]);
+
+  function set(key: string, value: unknown) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function onSave(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setMessage('');
+    try {
+      await api.put(`/settings/${section}`, form);
+      setMessage('Saved successfully');
+    } catch (err: unknown) {
+      setMessage((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function onReset() {
+    setForm(defaults);
+  }
+
+  return (
+    <form onSubmit={onSave} className="space-y-5">
+      <div className="flex items-center gap-2 border-b border-border pb-4">
+        {icon}
+        <div>
+          <h2 className="text-lg font-bold text-foreground">{title}</h2>
+          {description && <p className="text-sm font-medium text-muted">{description}</p>}
+        </div>
+      </div>
+
+      {banner}
+
+      <div className="space-y-4">{children({ form, set })}</div>
+
+      <div className="flex flex-wrap items-center gap-2 pt-2">
+        {showReset && (
+          <button type="button" className={btnSecondary} onClick={onReset}>
+            <RotateCcw className="h-4 w-4" /> Reset
+          </button>
+        )}
+        <button type="submit" className={btnPrimary} disabled={saving}>
+          <Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save'}
+        </button>
+        {message && <span className="text-sm font-semibold text-success">{message}</span>}
+      </div>
+    </form>
+  );
+}
+
+export function FloatingField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="relative block">
+      <span className="absolute -top-2 left-3 z-10 bg-surface px-1 text-xs font-semibold text-muted">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+export { Field, fieldClass };
