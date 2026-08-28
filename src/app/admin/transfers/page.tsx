@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ArrowLeftRight } from 'lucide-react';
 import api from '@/lib/api';
+import { TOOLS_TABS } from '@/lib/nav';
 import { AdminListShell, AdminPagedTable } from '@/components/admin/AdminListShell';
 import { Field, FormActions, Modal } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
@@ -58,6 +59,7 @@ export default function TransfersPage() {
         icon={<ArrowLeftRight className="h-5 w-5 text-plum" />}
         search={search}
         onSearch={setSearch}
+        tabs={TOOLS_TABS}
         action={
           <button type="button" className={btnPrimary} onClick={() => setOpen(true)}>
             New transfer

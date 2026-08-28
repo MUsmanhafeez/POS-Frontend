@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
@@ -22,6 +23,8 @@ type SessionRow = {
 type Shift = { id: string; name: string; code?: string };
 type Branch = { id: string; name: unknown };
 
+const emptyForm = { shift_id: '', branch_id: '', notes: '' };
+
 export default function ShiftSessionsPage() {
   const [items, setItems] = useState<SessionRow[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -29,7 +32,7 @@ export default function ShiftSessionsPage() {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ shift_id: '', branch_id: '', notes: '' });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [ss, sh, b] = await Promise.all([
@@ -48,6 +51,28 @@ export default function ShiftSessionsPage() {
 
   const rows = useMemo(() => items, [items]);
 
+  function openCreate() {
+    setForm({
+      shift_id: shifts[0]?.id || '',
+      branch_id: branches[0]?.id || '',
+      notes: '',
+    });
+    setOpen(true);
+  }
+
+  async function onClose(row: SessionRow) {
+    if (!window.confirm(`Close shift session "${row.shift || row.shift_name || row.id}"?`)) return;
+    await api.put(`/shift-sessions/${row.id}/close`);
+    await load();
+  }
+
+  async function onDelete(row: SessionRow) {
+    const label = String(row.shift || row.shift_name || row.id);
+    if (!(await confirmRowDelete(label))) return;
+    await api.delete(`/shift-sessions/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -60,6 +85,11 @@ export default function ShiftSessionsPage() {
     }
   }
 
+  const isOpen = (row: SessionRow) => {
+    const status = String(row.status || '').toLowerCase();
+    return status !== 'closed' && !row.closed_at;
+  };
+
   return (
     <>
       <AdminListShell
@@ -68,18 +98,7 @@ export default function ShiftSessionsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({
-                shift_id: shifts[0]?.id || '',
-                branch_id: branches[0]?.id || '',
-                notes: '',
-              });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Open Shift
           </button>
         }
@@ -87,6 +106,12 @@ export default function ShiftSessionsPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onDelete: () => onDelete(row),
+            extra: isOpen(row)
+              ? [{ label: 'Close', onClick: () => onClose(row) }]
+              : undefined,
+          })}
           columns={[
             { key: 'shift', header: 'Shift', render: (r) => r.shift || r.shift_name || '—' },
             { key: 'branch', header: 'Branch', render: (r) => labelOf(r.branch) || '—' },
@@ -107,7 +132,6 @@ export default function ShiftSessionsPage() {
               header: 'Closed At',
               render: (r) => (r.closed_at ? String(r.closed_at).replace('T', ' ').slice(0, 19) : '—'),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>

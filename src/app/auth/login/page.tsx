@@ -30,36 +30,36 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="grid min-h-screen place-items-center bg-[radial-gradient(circle_at_top,_rgba(45,212,191,0.25),_transparent_45%),radial-gradient(circle_at_bottom_right,_rgba(251,146,60,0.2),_transparent_40%),#eef6f4] px-4">
-      <form onSubmit={onSubmit} className="w-full max-w-md rounded-2xl border border-teal-200 bg-white p-8 shadow-xl">
+    <div className="grid min-h-screen place-items-center bg-background px-4">
+      <form onSubmit={onSubmit} className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 shadow-xl">
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-600 to-emerald-500 text-lg font-bold text-white shadow-sm">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand to-accent text-lg font-bold text-white shadow-sm">
             F
           </div>
-          <h1 className="text-2xl font-bold tracking-[0.14em] text-slate-900">FORKIVA</h1>
-          <p className="mt-2 text-sm font-medium text-slate-600">Welcome to Forkiva Restaurant POS</p>
+          <h1 className="text-2xl font-bold tracking-[0.14em] text-foreground">FORKIVA</h1>
+          <p className="mt-2 text-sm font-medium text-muted">Welcome to Forkiva Restaurant POS</p>
         </div>
         {error && (
-          <div className="mb-4 rounded-xl bg-rose-100 px-3 py-2 text-sm font-medium text-rose-700">{error}</div>
+          <div className="mb-4 rounded-xl bg-danger-soft px-3 py-2 text-sm font-medium text-danger">{error}</div>
         )}
-        <label className="mb-1 block text-sm font-semibold text-slate-800">Email or username</label>
+        <label className="mb-1 block text-sm font-semibold text-foreground">Email or username</label>
         <input
-          className="mb-4 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
+          className="mb-4 w-full rounded-xl border border-border-strong bg-surface px-3 py-2.5 text-sm font-medium text-foreground outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
           required
         />
-        <label className="mb-1 block text-sm font-semibold text-slate-800">Password</label>
+        <label className="mb-1 block text-sm font-semibold text-foreground">Password</label>
         <input
           type="password"
-          className="mb-6 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-medium text-slate-900 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
+          className="mb-6 w-full rounded-xl border border-border-strong bg-surface px-3 py-2.5 text-sm font-medium text-foreground outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
         />
         <button
           disabled={loading}
-          className="btn-solid w-full rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 py-2.5 font-bold !text-white shadow-sm transition hover:from-teal-700 hover:to-emerald-700 disabled:opacity-60"
+          className="btn-solid w-full rounded-xl bg-brand py-2.5 font-bold !text-white shadow-sm transition hover:bg-brand-hover disabled:opacity-60"
         >
           {loading ? 'Signing in...' : 'Login'}
         </button>

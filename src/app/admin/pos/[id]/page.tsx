@@ -21,11 +21,9 @@ import {
   RotateCcw,
   ShoppingBag,
   Sun,
-  Table2,
   UserRound,
   Users,
   UtensilsCrossed,
-  Wallet,
   X,
   ChefHat,
 } from 'lucide-react';
@@ -33,6 +31,13 @@ import clsx from 'clsx';
 import api from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { labelOf } from '@/lib/ui';
+import {
+  POS_MODULE_ITEMS,
+  PosHomeDeliveryModal,
+  PosModules,
+  PosOrderTypeFields,
+  type PosModuleId,
+} from '@/components/pos/PosModules';
 
 type CartItem = {
   productId: string;
@@ -78,12 +83,7 @@ const CAT_TONES = [
   'bg-violet-600 text-white',
 ];
 
-const MODULES = [
-  { href: '/admin/seating', label: 'Table Viewer', icon: Table2 },
-  { href: '/admin/orders', label: 'Orders', icon: ShoppingBag },
-  { href: '/admin/orders', label: 'Sales Return', icon: RotateCcw },
-  { href: '/admin/shift-sessions', label: 'Cash Movement', icon: Wallet },
-];
+const MODULES = POS_MODULE_ITEMS;
 
 const VAT_RATE = 0.15;
 
@@ -123,6 +123,13 @@ export default function PosViewerPage() {
   const [dark, setDark] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [activeModule, setActiveModule] = useState<PosModuleId | null>(null);
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
+  const [orderMeta, setOrderMeta] = useState<Record<string, string>>({});
+  const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
+  const [waiters, setWaiters] = useState<Array<{ id: string; name: string }>>([]);
+  const [customerId, setCustomerId] = useState('');
+  const [waiterId, setWaiterId] = useState('');
 
   const register = boot?.register as Record<string, unknown> | undefined;
   const products = (boot?.products as Array<Record<string, unknown>>) || [];
@@ -160,6 +167,12 @@ export default function PosViewerPage() {
   useEffect(() => {
     load().catch(console.error);
     setDark(localStorage.getItem('forkiva-theme') === 'dark');
+    Promise.all([api.get('/customers'), api.get('/users')])
+      .then(([c, u]) => {
+        setCustomers((c.data.body || []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
+        setWaiters((u.data.body || []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
+      })
+      .catch(() => undefined);
   }, [registerId]);
 
   useEffect(() => {
@@ -261,6 +274,9 @@ export default function PosViewerPage() {
     if (cartUuid && next) {
       await syncCartMeta(cartUuid, { order_type: next.value }).catch(() => undefined);
     }
+    if (id === 'home_delivery' && !orderMeta.address) {
+      setDeliveryOpen(true);
+    }
     setSidebarOpen(false);
   }
 
@@ -286,7 +302,12 @@ export default function PosViewerPage() {
     setBusy(true);
     try {
       const uuid = await ensureCart();
-      if (notes) await syncCartMeta(uuid, { notes });
+      const metaNote = Object.entries(orderMeta)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(' | ');
+      const mergedNotes = [notes, metaNote].filter(Boolean).join('\n');
+      if (mergedNotes) await syncCartMeta(uuid, { notes: mergedNotes, customer_id: customerId || undefined });
       const { data } = await api.post(`/cart/${uuid}/checkout`, {
         mark_paid: mode === 'pay',
         payment_method: 'cash',
@@ -363,14 +384,15 @@ export default function PosViewerPage() {
           {MODULES.map((mod) => {
             const Icon = mod.icon;
             return (
-              <Link
-                key={mod.label}
-                href={mod.href}
+              <button
+                key={mod.id}
+                type="button"
+                onClick={() => setActiveModule(mod.id)}
                 className="mb-1 flex w-full flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-center text-teal-50 transition hover:bg-white/10"
               >
                 <Icon className="h-5 w-5" />
                 <span className="text-[11px] font-semibold leading-tight">{mod.label}</span>
-              </Link>
+              </button>
             );
           })}
           <Link
@@ -585,18 +607,35 @@ export default function PosViewerPage() {
               <div className="grid gap-2">
                 <label className="relative block">
                   <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-teal-600" />
-                  <select className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-8 text-sm font-medium text-slate-800 outline-none focus:border-teal-500">
-                    <option>Select Waiter</option>
-                    <option>{user?.name || 'Cashier'}</option>
+                  <select
+                    className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-8 text-sm font-medium text-slate-800 outline-none focus:border-teal-500"
+                    value={waiterId}
+                    onChange={(e) => setWaiterId(e.target.value)}
+                  >
+                    <option value="">Select Waiter</option>
+                    {waiters.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name}
+                      </option>
+                    ))}
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                 </label>
                 <div className="flex gap-2">
                   <label className="relative block flex-1">
                     <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-600" />
-                    <select className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-8 text-sm font-medium text-slate-800 outline-none focus:border-sky-500">
-                      <option>Select Customer</option>
-                      <option>Walk-in</option>
+                    <select
+                      className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-8 text-sm font-medium text-slate-800 outline-none focus:border-sky-500"
+                      value={customerId}
+                      onChange={(e) => setCustomerId(e.target.value)}
+                    >
+                      <option value="">Select Customer</option>
+                      <option value="walk-in">Walk-in</option>
+                      {customers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
                     </select>
                     <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                   </label>
@@ -669,6 +708,13 @@ export default function PosViewerPage() {
             </div>
 
             <div className="border-t border-slate-200 bg-slate-50/80 px-4 py-3">
+              <PosOrderTypeFields
+                orderTypeId={orderTypeId}
+                meta={orderMeta}
+                onChange={(patch) => setOrderMeta((m) => ({ ...m, ...patch }))}
+                onOpenDelivery={() => setDeliveryOpen(true)}
+              />
+
               <label className="mb-3 block">
                 <span className="mb-1 block text-xs font-bold text-slate-700">Notes</span>
                 <input
@@ -740,6 +786,27 @@ export default function PosViewerPage() {
           </aside>
         </div>
       </div>
+
+      <PosModules
+        active={activeModule}
+        onClose={() => setActiveModule(null)}
+        sessionId={sessionId}
+        branchId={String(register?.branchId || '')}
+        currency={currency}
+        onSelectTable={(tableId, tableName) => {
+          setOrderMeta((m) => ({ ...m, table_id: tableId, table_name: tableName }));
+          setOrderTypeId('dine_in');
+        }}
+      />
+      <PosHomeDeliveryModal
+        open={deliveryOpen}
+        onClose={() => setDeliveryOpen(false)}
+        initial={orderMeta}
+        onConfirm={(data) => {
+          const address = data.address || [data.block, data.street, data.area, data.city].filter(Boolean).join(', ');
+          setOrderMeta((m) => ({ ...m, ...data, address: address || m.address }));
+        }}
+      />
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ClipboardCheck, Plus } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
 import { Field, FormActions, Modal } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
@@ -19,20 +19,22 @@ type Row = {
   created_at?: string;
 };
 
+const emptyForm = {
+  branch_id: '',
+  voucher_no: '',
+  closing_date: new Date().toISOString().slice(0, 10),
+  template: 'Default',
+  status: 'draft',
+  items_count: '0',
+};
+
 export default function StockClosingsPage() {
   const [items, setItems] = useState<Row[]>([]);
   const [branches, setBranches] = useState<Array<{ id: string; name: unknown }>>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    branch_id: '',
-    voucher_no: '',
-    closing_date: new Date().toISOString().slice(0, 10),
-    template: 'Default',
-    status: 'draft',
-    items_count: '0',
-  });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [c, b] = await Promise.all([api.get('/inventory/stock-closings'), api.get('/branches')]);
@@ -54,6 +56,15 @@ export default function StockClosingsPage() {
     );
   }, [items, search]);
 
+  function openCreate() {
+    setForm({
+      ...emptyForm,
+      branch_id: branches[0]?.id || '',
+      closing_date: new Date().toISOString().slice(0, 10),
+    });
+    setOpen(true);
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -74,21 +85,7 @@ export default function StockClosingsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({
-                branch_id: branches[0]?.id || '',
-                voucher_no: '',
-                closing_date: new Date().toISOString().slice(0, 10),
-                template: 'Default',
-                status: 'draft',
-                items_count: '0',
-              });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Stock Closing
           </button>
         }
@@ -113,7 +110,6 @@ export default function StockClosingsPage() {
               header: 'Created at',
               render: (r) => String(r.created_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>

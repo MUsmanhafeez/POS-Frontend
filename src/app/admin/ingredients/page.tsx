@@ -3,20 +3,35 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { List, Plus } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
+import { rowLabel } from '@/lib/tableCrud';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
 type IngredientRow = {
   id: string;
   name: string;
   branch?: unknown;
+  branch_id?: string;
   current_stock?: number;
+  quantity?: number;
   alert_quantity?: number;
+  reorder_level?: number;
   unit?: string;
   cost_per_unit?: number;
+  cost?: number;
   created_at?: string;
   updated_at?: string;
+};
+
+const emptyForm = {
+  name: '',
+  branch_id: '',
+  unit: 'pcs',
+  quantity: '0',
+  reorder_level: '5',
+  cost: '0',
 };
 
 export default function IngredientsPage() {
@@ -25,15 +40,9 @@ export default function IngredientsPage() {
   const [units, setUnits] = useState<Array<{ id: string; symbol: string; name: string }>>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<IngredientRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    branch_id: '',
-    unit: 'pcs',
-    quantity: '0',
-    reorder_level: '5',
-    cost: '0',
-  });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [i, b, u] = await Promise.all([
@@ -52,17 +61,49 @@ export default function IngredientsPage() {
 
   const rows = useMemo(() => items, [items]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm({
+      ...emptyForm,
+      branch_id: branches[0]?.id || '',
+      unit: units[0]?.symbol || 'pcs',
+    });
+    setOpen(true);
+  }
+
+  function openEdit(row: IngredientRow) {
+    setEditing(row);
+    setForm({
+      name: row.name,
+      branch_id: row.branch_id || '',
+      unit: row.unit || 'pcs',
+      quantity: String(row.current_stock ?? row.quantity ?? 0),
+      reorder_level: String(row.alert_quantity ?? row.reorder_level ?? 0),
+      cost: String(row.cost_per_unit ?? row.cost ?? 0),
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: IngredientRow) {
+    if (!(await confirmRowDelete(rowLabel(row)))) return;
+    await api.delete(`/inventory/ingredients/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/inventory/ingredients', {
+      const payload = {
         ...form,
         quantity: Number(form.quantity || 0),
         reorder_level: Number(form.reorder_level || 0),
         cost: Number(form.cost || 0),
-      });
+      };
+      if (editing) await api.put(`/inventory/ingredients/${editing.id}`, payload);
+      else await api.post('/inventory/ingredients', payload);
       setOpen(false);
+      setEditing(null);
       await load();
     } finally {
       setSaving(false);
@@ -77,21 +118,7 @@ export default function IngredientsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({
-                name: '',
-                branch_id: branches[0]?.id || '',
-                unit: units[0]?.symbol || 'pcs',
-                quantity: '0',
-                reorder_level: '5',
-                cost: '0',
-              });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Ingredient
           </button>
         }
@@ -99,6 +126,10 @@ export default function IngredientsPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
             { key: 'branch', header: 'Branch', render: (r) => labelOf(r.branch) || '—' },
@@ -120,15 +151,27 @@ export default function IngredientsPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>
       <Modal
         open={open}
-        title="Create Ingredient"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="ingredient-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Ingredient' : 'Create Ingredient'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="ingredient-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="ingredient-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Name">

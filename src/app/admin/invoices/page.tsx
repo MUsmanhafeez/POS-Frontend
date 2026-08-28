@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { FileText } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
 import { labelOf } from '@/lib/ui';
 
 type InvoiceRow = {
@@ -56,7 +56,6 @@ export default function InvoicesPage() {
             header: 'Issued At',
             render: (r) => String(r.issued_at || '—').replace('T', ' ').slice(0, 19),
           },
-          { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
         ]}
       />
     </AdminListShell>

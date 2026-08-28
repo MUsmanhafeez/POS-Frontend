@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Ban, Plus } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
+import { rowLabel } from '@/lib/tableCrud';
 import { btnPrimary, fieldClass } from '@/lib/ui';
 
 type ReasonRow = {
@@ -16,12 +18,15 @@ type ReasonRow = {
   updated_at?: string;
 };
 
+const emptyForm = { name: '', type: 'Refund', is_active: true };
+
 export default function ReasonsPage() {
   const [items, setItems] = useState<ReasonRow[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<ReasonRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', type: 'Refund', is_active: true });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const r = await api.get('/sales/reasons', { params: { search } });
@@ -32,13 +37,33 @@ export default function ReasonsPage() {
     load().catch(console.error);
   }, [search]);
 
-  async function onSubmit(e: React.FormEvent) {
+  function openCreate() {
+    setEditing(null);
+    setForm(emptyForm);
+    setOpen(true);
+  }
+
+  function openEdit(row: ReasonRow) {
+    setEditing(row);
+    setForm({ name: row.name, type: row.type, is_active: row.is_active });
+    setOpen(true);
+  }
+
+  async function onDelete(row: ReasonRow) {
+    if (!(await confirmRowDelete(rowLabel(row)))) return;
+    await api.delete(`/sales/reasons/${row.id}`);
+    await load();
+  }
+
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/sales/reasons', form);
+      if (editing) await api.put(`/sales/reasons/${editing.id}`, form);
+      else await api.post('/sales/reasons', form);
       setOpen(false);
-      setForm({ name: '', type: 'Refund', is_active: true });
+      setEditing(null);
+      setForm(emptyForm);
       await load();
     } catch (err) {
       console.error(err);
@@ -55,7 +80,7 @@ export default function ReasonsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button type="button" className={btnPrimary} onClick={() => setOpen(true)}>
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Reason
           </button>
         }
@@ -63,6 +88,10 @@ export default function ReasonsPage() {
         <AdminPagedTable
           rows={items}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
             { key: 'type', header: 'Type', render: (r) => <StatusBadge value={r.type} /> },
@@ -81,16 +110,28 @@ export default function ReasonsPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>
 
       <Modal
         open={open}
-        title="Create Reason"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="reason-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Reason' : 'Create Reason'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="reason-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="reason-form" className="space-y-3" onSubmit={onSubmit}>
           <Field label="Name">

@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ImageIcon, Plus, ShoppingBag } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
@@ -11,24 +12,30 @@ type ProductRow = {
   id: string;
   name: unknown;
   price?: number;
+  sku?: string;
   isActive?: boolean;
+  is_active?: boolean;
   thumbnail?: string | null;
   created_at?: string;
   updated_at?: string;
   createdAt?: string;
   updatedAt?: string;
   menuId?: string;
+  menu_id?: string;
 };
 
 type Menu = { id: string; name: unknown };
+
+const emptyForm = { name: '', price: '', menu_id: '', sku: '', is_active: true };
 
 export default function ProductsPage() {
   const [items, setItems] = useState<ProductRow[]>([]);
   const [menus, setMenus] = useState<Menu[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<ProductRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', price: '', menu_id: '', sku: '', is_active: true });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [p, m] = await Promise.all([
@@ -45,16 +52,42 @@ export default function ProductsPage() {
 
   const rows = useMemo(() => items, [items]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm({ ...emptyForm, menu_id: menus[0]?.id || '' });
+    setOpen(true);
+  }
+
+  function openEdit(row: ProductRow) {
+    setEditing(row);
+    setForm({
+      name: labelOf(row.name),
+      price: String(row.price ?? ''),
+      menu_id: row.menu_id || row.menuId || '',
+      sku: row.sku || '',
+      is_active: row.isActive !== false && row.is_active !== false,
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: ProductRow) {
+    if (!(await confirmRowDelete(labelOf(row.name)))) return;
+    await api.delete(`/products/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/products', {
+      const payload = {
         ...form,
         price: Number(form.price || 0),
-      });
+      };
+      if (editing) await api.put(`/products/${editing.id}`, payload);
+      else await api.post('/products', payload);
       setOpen(false);
-      setForm({ name: '', price: '', menu_id: menus[0]?.id || '', sku: '', is_active: true });
+      setEditing(null);
       await load();
     } catch (err) {
       console.error(err);
@@ -71,14 +104,7 @@ export default function ProductsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({ name: '', price: '', menu_id: menus[0]?.id || '', sku: '', is_active: true });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Product
           </button>
         }
@@ -86,6 +112,10 @@ export default function ProductsPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             {
               key: 'thumbnail',
@@ -105,7 +135,7 @@ export default function ProductsPage() {
             {
               key: 'activation',
               header: 'Activation',
-              render: (r) => <StatusBadge value={r.isActive === false ? 'Inactive' : 'Active'} />,
+              render: (r) => <StatusBadge value={r.isActive === false || r.is_active === false ? 'Inactive' : 'Active'} />,
             },
             {
               key: 'created',
@@ -117,16 +147,28 @@ export default function ProductsPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || r.updatedAt || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>
 
       <Modal
         open={open}
-        title="Create Product"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="product-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Product' : 'Create Product'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="product-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="product-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Menu">

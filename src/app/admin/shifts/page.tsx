@@ -3,14 +3,17 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Clock, Plus } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
+import { rowLabel } from '@/lib/tableCrud';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
 type ShiftRow = {
   id: string;
   name: string;
   branch?: unknown;
+  branch_id?: string;
   code?: string | null;
   start_time?: string;
   end_time?: string;
@@ -21,21 +24,28 @@ type ShiftRow = {
 
 type Branch = { id: string; name: unknown };
 
+const emptyForm = {
+  name: '',
+  code: '',
+  branch_id: '',
+  start_time: '10:00',
+  end_time: '19:00',
+  block_close_if_pending: true,
+  is_active: true,
+};
+
+function timeInputValue(value?: string) {
+  return String(value || '10:00').slice(0, 5);
+}
+
 export default function ShiftsPage() {
   const [items, setItems] = useState<ShiftRow[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<ShiftRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    code: '',
-    branch_id: '',
-    start_time: '10:00',
-    end_time: '19:00',
-    block_close_if_pending: true,
-    is_active: true,
-  });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [s, b] = await Promise.all([
@@ -52,16 +62,45 @@ export default function ShiftsPage() {
 
   const rows = useMemo(() => items, [items]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm({ ...emptyForm, branch_id: branches[0]?.id || '' });
+    setOpen(true);
+  }
+
+  function openEdit(row: ShiftRow) {
+    setEditing(row);
+    setForm({
+      name: row.name,
+      code: row.code || '',
+      branch_id: row.branch_id || '',
+      start_time: timeInputValue(row.start_time),
+      end_time: timeInputValue(row.end_time),
+      block_close_if_pending: row.block_close_if_pending !== false,
+      is_active: row.is_active !== false,
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: ShiftRow) {
+    if (!(await confirmRowDelete(rowLabel(row)))) return;
+    await api.delete(`/shifts/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/shifts', {
+      const payload = {
         ...form,
         start_time: form.start_time.length === 5 ? `${form.start_time}:00` : form.start_time,
         end_time: form.end_time.length === 5 ? `${form.end_time}:00` : form.end_time,
-      });
+      };
+      if (editing) await api.put(`/shifts/${editing.id}`, payload);
+      else await api.post('/shifts', payload);
       setOpen(false);
+      setEditing(null);
       await load();
     } finally {
       setSaving(false);
@@ -76,22 +115,7 @@ export default function ShiftsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({
-                name: '',
-                code: '',
-                branch_id: branches[0]?.id || '',
-                start_time: '10:00',
-                end_time: '19:00',
-                block_close_if_pending: true,
-                is_active: true,
-              });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Shift
           </button>
         }
@@ -99,6 +123,10 @@ export default function ShiftsPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
             { key: 'branch', header: 'Branch', render: (r) => labelOf(r.branch) || '—' },
@@ -120,16 +148,28 @@ export default function ShiftsPage() {
               header: 'Created at',
               render: (r) => String(r.created_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>
 
       <Modal
         open={open}
-        title="Create Shift"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="shift-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Shift' : 'Create Shift'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="shift-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="shift-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Name">

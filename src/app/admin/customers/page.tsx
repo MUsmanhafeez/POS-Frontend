@@ -9,11 +9,14 @@ import { btnPrimary, fieldClass } from '@/lib/ui';
 
 type Row = { id: string; name: string; phone?: string; email?: string; loyalty_points?: number; loyaltyPoints?: number };
 
+const emptyForm = { name: '', phone: '', email: '' };
+
 export default function CustomersPage() {
   const [items, setItems] = useState<Row[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: '', phone: '', email: '' });
+  const [editing, setEditing] = useState<Row | null>(null);
+  const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
   async function load() {
@@ -26,13 +29,27 @@ export default function CustomersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm(emptyForm);
+    setOpen(true);
+  }
+
+  function openEdit(row: Row) {
+    setEditing(row);
+    setForm({ name: row.name, phone: row.phone || '', email: row.email || '' });
+    setOpen(true);
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/customers', form);
+      if (editing) await api.put(`/customers/${editing.id}`, form);
+      else await api.post('/customers', form);
       setOpen(false);
-      setForm({ name: '', phone: '', email: '' });
+      setEditing(null);
+      setForm(emptyForm);
       await load();
     } finally {
       setSaving(false);
@@ -47,7 +64,7 @@ export default function CustomersPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button type="button" className={btnPrimary} onClick={() => setOpen(true)}>
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             Add customer
           </button>
         }
@@ -55,6 +72,9 @@ export default function CustomersPage() {
         <AdminPagedTable
           rows={items}
           emptyTitle="No customers"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => r.name },
             { key: 'phone', header: 'Phone', render: (r) => r.phone || '—' },
@@ -65,9 +85,22 @@ export default function CustomersPage() {
       </AdminListShell>
       <Modal
         open={open}
-        title="Add customer"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="cust-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Save" />}
+        title={editing ? 'Edit customer' : 'Add customer'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="cust-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Save'}
+          />
+        }
       >
         <form id="cust-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Name">

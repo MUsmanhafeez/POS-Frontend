@@ -3,18 +3,32 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Printer } from 'lucide-react';
 import api from '@/lib/api';
+import { PRINTERS_TABS } from '@/lib/nav';
 import { AdminListShell, AdminPagedTable } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
-import { btnPrimary, fieldClass } from '@/lib/ui';
+import { rowLabel } from '@/lib/tableCrud';
+import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
-type Row = { id: string; name: string; printer_type?: string; printerType?: string; address?: string; is_active?: boolean };
+type Row = {
+  id: string;
+  name: string;
+  printer_type?: string;
+  printerType?: string;
+  address?: string;
+  branch_id?: string;
+  is_active?: boolean;
+};
+
+const emptyForm = { name: '', printer_type: 'receipt', address: '', branch_id: '' };
 
 export default function PrintersPage() {
   const [items, setItems] = useState<Row[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Row | null>(null);
   const [branches, setBranches] = useState<Array<{ id: string; name: unknown }>>([]);
-  const [form, setForm] = useState({ name: '', printer_type: 'receipt', address: '', branch_id: '' });
+  const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
   async function load() {
@@ -27,12 +41,37 @@ export default function PrintersPage() {
     load().catch(console.error);
   }, []);
 
+  function openCreate() {
+    setEditing(null);
+    setForm({ ...emptyForm, branch_id: branches[0]?.id || '' });
+    setOpen(true);
+  }
+
+  function openEdit(row: Row) {
+    setEditing(row);
+    setForm({
+      name: row.name,
+      printer_type: row.printer_type || row.printerType || 'receipt',
+      address: row.address || '',
+      branch_id: row.branch_id || '',
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: Row) {
+    if (!(await confirmRowDelete(rowLabel(row)))) return;
+    await api.delete(`/printers/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/printers', form);
+      if (editing) await api.put(`/printers/${editing.id}`, form);
+      else await api.post('/printers', form);
       setOpen(false);
+      setEditing(null);
       await load();
     } finally {
       setSaving(false);
@@ -48,8 +87,9 @@ export default function PrintersPage() {
         icon={<Printer className="h-5 w-5 text-plum" />}
         search={search}
         onSearch={setSearch}
+        tabs={PRINTERS_TABS}
         action={
-          <button type="button" className={btnPrimary} onClick={() => setOpen(true)}>
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             Add printer
           </button>
         }
@@ -57,6 +97,10 @@ export default function PrintersPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No printers"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => r.name },
             { key: 'type', header: 'Type', render: (r) => r.printer_type || r.printerType || '—' },
@@ -66,9 +110,22 @@ export default function PrintersPage() {
       </AdminListShell>
       <Modal
         open={open}
-        title="Add printer"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="printer-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Save" />}
+        title={editing ? 'Edit printer' : 'Add printer'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="printer-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Save'}
+          />
+        }
       >
         <form id="printer-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Branch">
@@ -76,7 +133,7 @@ export default function PrintersPage() {
               <option value="">Select</option>
               {branches.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {typeof b.name === 'object' ? (b.name as { en?: string }).en : String(b.name)}
+                  {labelOf(b.name)}
                 </option>
               ))}
             </select>

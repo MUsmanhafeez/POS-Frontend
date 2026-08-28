@@ -1,10 +1,11 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Building2, Plus } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
@@ -26,6 +27,8 @@ type BranchRow = {
   updated_at?: string;
 };
 
+const emptyForm = { name: '', city: '', phone: '', email: '', is_active: true };
+
 function InfoButton({ label }: { label: string }) {
   return (
     <button type="button" className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-surface-muted">
@@ -35,11 +38,13 @@ function InfoButton({ label }: { label: string }) {
 }
 
 export default function BranchesPage() {
+  const router = useRouter();
   const [items, setItems] = useState<BranchRow[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<BranchRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', city: '', phone: '', email: '', is_active: true });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const { data } = await api.get('/branches');
@@ -56,13 +61,39 @@ export default function BranchesPage() {
     return items.filter((r) => labelOf(r.name).toLowerCase().includes(q) || String(r.city || '').toLowerCase().includes(q));
   }, [items, search]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm(emptyForm);
+    setOpen(true);
+  }
+
+  function openEdit(row: BranchRow) {
+    setEditing(row);
+    setForm({
+      name: labelOf(row.name),
+      city: row.city || '',
+      phone: row.phone || '',
+      email: row.email || '',
+      is_active: row.isActive !== false,
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: BranchRow) {
+    if (!(await confirmRowDelete(labelOf(row.name)))) return;
+    await api.delete(`/branches/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/branches', form);
+      if (editing) await api.put(`/branches/${editing.id}`, form);
+      else await api.post('/branches', form);
       setOpen(false);
-      setForm({ name: '', city: '', phone: '', email: '', is_active: true });
+      setEditing(null);
+      setForm(emptyForm);
       await load();
     } catch (err) {
       console.error(err);
@@ -79,14 +110,7 @@ export default function BranchesPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({ name: '', city: '', phone: '', email: '', is_active: true });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Branch
           </button>
         }
@@ -94,6 +118,11 @@ export default function BranchesPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+            extra: [{ label: 'Configure', onClick: () => router.push(`/admin/branches/${row.id}`) }],
+          })}
           columns={[
             {
               key: 'id',
@@ -131,23 +160,28 @@ export default function BranchesPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || r.updatedAt || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: (r) => (
-              <div className="flex items-center gap-2">
-                <Link href={`/admin/branches/${r.id}`} className="text-sm font-medium text-brand">
-                  Configure
-                </Link>
-                <ActionsMenu />
-              </div>
-            ) },
           ]}
         />
       </AdminListShell>
 
       <Modal
         open={open}
-        title="Create Branch"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="branch-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Branch' : 'Create Branch'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="branch-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="branch-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Name">

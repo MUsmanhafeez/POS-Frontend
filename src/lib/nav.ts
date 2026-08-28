@@ -159,17 +159,21 @@ export const ADMIN_NAV: NavSection[] = [
         permission: 'admin.settings.index',
         children: [
           { href: '/admin/tools', label: 'Utilities' },
+          { href: '/admin/tools/database', label: 'Database' },
           { href: '/admin/transfers', label: 'Inter-Branch Transfers', permission: 'admin.inventory.index' },
           { href: '/admin/queue', label: 'Queue / Tokens' },
-          { href: '/admin/taxes', label: 'Taxes', permission: 'admin.taxes.index' },
         ],
       },
       {
-        href: '/admin/localization',
+        href: '/admin/translations',
         label: 'Localization',
         icon: Globe2,
         permission: 'admin.translations.index',
-        children: [{ href: '/admin/localization', label: 'Languages & Regions' }],
+        children: [
+          { href: '/admin/translations', label: 'Translations' },
+          { href: '/admin/currency-rates', label: 'Currency Rates' },
+          { href: '/admin/taxes', label: 'Taxes', permission: 'admin.taxes.index' },
+        ],
       },
       {
         href: '/admin/reports',
@@ -178,18 +182,24 @@ export const ADMIN_NAV: NavSection[] = [
         permission: 'admin.reports.index',
       },
       {
-        href: '/admin/activities',
+        href: '/admin/activity-logs',
         label: 'Activities',
         icon: Activity,
         permission: 'admin.activities.index',
-        children: [{ href: '/admin/activities', label: 'Activity Log' }],
+        children: [
+          { href: '/admin/activity-logs', label: 'Activity Logs' },
+          { href: '/admin/authentication-logs', label: 'Authentication Logs' },
+        ],
       },
       {
         href: '/admin/printers',
         label: 'Manage Printers',
         icon: Printer,
         permission: 'admin.printers.index',
-        children: [{ href: '/admin/printers', label: 'Printers' }],
+        children: [
+          { href: '/admin/printers', label: 'Printers' },
+          { href: '/admin/print-agents', label: 'Print Agents' },
+        ],
       },
       {
         href: '/admin/settings',
@@ -200,6 +210,29 @@ export const ADMIN_NAV: NavSection[] = [
     ],
   },
 ];
+
+export const LOCALIZATION_TABS = [
+  { href: '/admin/translations', label: 'Translations' },
+  { href: '/admin/currency-rates', label: 'Currency Rates' },
+  { href: '/admin/taxes', label: 'Taxes' },
+] as const;
+
+export const PRINTERS_TABS = [
+  { href: '/admin/printers', label: 'Printers' },
+  { href: '/admin/print-agents', label: 'Print Agents' },
+] as const;
+
+export const TOOLS_TABS = [
+  { href: '/admin/tools', label: 'Utilities' },
+  { href: '/admin/tools/database', label: 'Database' },
+  { href: '/admin/transfers', label: 'Inter-Branch Transfers' },
+  { href: '/admin/queue', label: 'Queue / Tokens' },
+] as const;
+
+export const ACTIVITIES_TABS = [
+  { href: '/admin/activity-logs', label: 'Activity Logs' },
+  { href: '/admin/authentication-logs', label: 'Authentication Logs' },
+] as const;
 
 export const SETTINGS_NAV = [
   { href: '/admin/settings/general', label: 'General', icon: Settings },

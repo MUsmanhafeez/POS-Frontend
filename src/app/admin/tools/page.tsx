@@ -8,19 +8,20 @@ import {
   KeyRound,
   RefreshCw,
   Ticket,
-  Wrench,
-  Percent,
   Activity,
+  Wrench,
 } from 'lucide-react';
 import api from '@/lib/api';
+import { SectionTabs } from '@/components/admin/SectionTabs';
+import { TOOLS_TABS } from '@/lib/nav';
 import { Card } from '@/components/ui';
 import { btnPrimary, fieldClass } from '@/lib/ui';
 
 const LINKS = [
   { href: '/admin/transfers', label: 'Inter-Branch Transfers', desc: 'Request, approve, and receive stock between branches', icon: ArrowLeftRight },
   { href: '/admin/queue', label: 'Queue / Tokens', desc: 'Issue and call tokens for quick-service counters', icon: Ticket },
-  { href: '/admin/taxes', label: 'Tax rules', desc: 'Manage master tax rates used at checkout', icon: Percent },
-  { href: '/admin/activities', label: 'Activity log', desc: 'Tamper-evident audit trail of admin actions', icon: Activity },
+  { href: '/admin/tools/database', label: 'Database', desc: 'Backup and restore MySQL database', icon: Database },
+  { href: '/admin/activity-logs', label: 'Activity log', desc: 'Tamper-evident audit trail of admin actions', icon: Activity },
   { href: '/admin/roles', label: 'Roles & permissions', desc: 'Edit RBAC permission sets', icon: KeyRound },
 ];
 
@@ -68,6 +69,8 @@ export default function ToolsPage() {
           <p className="text-sm text-muted">Utilities for sync, security PIN, and branch operations.</p>
         </div>
       </div>
+
+      <SectionTabs tabs={[...TOOLS_TABS]} />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {LINKS.map((l) => {

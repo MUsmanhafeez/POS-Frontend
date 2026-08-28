@@ -118,6 +118,7 @@ export const AR_MESSAGES: Record<string, string> = {
   Presentations: 'العروض التقديمية',
   Refresh: 'تحديث',
   Delete: 'حذف',
+  View: 'عرض',
   Info: 'معلومات',
   Edit: 'تعديل',
   'New folder': 'مجلد جديد',

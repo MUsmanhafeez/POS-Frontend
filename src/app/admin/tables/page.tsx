@@ -3,20 +3,26 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Plus, QrCode, Square } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
+import { rowLabel } from '@/lib/tableCrud';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
 type TableRow = {
   id: string;
   name: string;
   branch?: unknown;
+  branch_id?: string;
   floor?: unknown;
+  floor_id?: string;
   zone?: unknown;
+  zone_id?: string;
   capacity?: number;
   status?: string;
   qrcode?: string;
   isActive?: boolean;
+  is_active?: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -25,6 +31,16 @@ type Branch = { id: string; name: unknown };
 type Floor = { id: string; name: unknown; branchId?: string };
 type Zone = { id: string; name: unknown; floorId?: string };
 
+const emptyForm = {
+  name: '',
+  capacity: '4',
+  branch_id: '',
+  floor_id: '',
+  zone_id: '',
+  status: 'available',
+  is_active: true,
+};
+
 export default function TablesPage() {
   const [items, setItems] = useState<TableRow[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -32,16 +48,9 @@ export default function TablesPage() {
   const [zones, setZones] = useState<Zone[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<TableRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    name: '',
-    capacity: '4',
-    branch_id: '',
-    floor_id: '',
-    zone_id: '',
-    status: 'available',
-    is_active: true,
-  });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [t, b, f, z] = await Promise.all([
@@ -63,16 +72,49 @@ export default function TablesPage() {
   const rows = useMemo(() => items, [items]);
   const floorZones = zones.filter((z) => !form.floor_id || z.floorId === form.floor_id);
 
+  function openCreate() {
+    setEditing(null);
+    setForm({
+      ...emptyForm,
+      branch_id: branches[0]?.id || '',
+      floor_id: floors[0]?.id || '',
+    });
+    setOpen(true);
+  }
+
+  function openEdit(row: TableRow) {
+    setEditing(row);
+    setForm({
+      name: row.name,
+      capacity: String(row.capacity ?? 4),
+      branch_id: row.branch_id || '',
+      floor_id: row.floor_id || '',
+      zone_id: row.zone_id || '',
+      status: row.status || 'available',
+      is_active: row.isActive !== false && row.is_active !== false,
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: TableRow) {
+    if (!(await confirmRowDelete(rowLabel(row)))) return;
+    await api.delete(`/tables/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/tables', {
+      const payload = {
         ...form,
         capacity: Number(form.capacity || 4),
         zone_id: form.zone_id || null,
-      });
+      };
+      if (editing) await api.put(`/tables/${editing.id}`, payload);
+      else await api.post('/tables', payload);
       setOpen(false);
+      setEditing(null);
       await load();
     } catch (err) {
       console.error(err);
@@ -89,22 +131,7 @@ export default function TablesPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({
-                name: '',
-                capacity: '4',
-                branch_id: branches[0]?.id || '',
-                floor_id: floors[0]?.id || '',
-                zone_id: '',
-                status: 'available',
-                is_active: true,
-              });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Table
           </button>
         }
@@ -112,6 +139,10 @@ export default function TablesPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
             { key: 'branch', header: 'Branch', render: (r) => labelOf(r.branch) || '—' },
@@ -134,7 +165,7 @@ export default function TablesPage() {
             {
               key: 'activation',
               header: 'Activation',
-              render: (r) => <StatusBadge value={r.isActive === false ? 'Inactive' : 'Active'} />,
+              render: (r) => <StatusBadge value={r.isActive === false || r.is_active === false ? 'Inactive' : 'Active'} />,
             },
             {
               key: 'created',
@@ -146,16 +177,28 @@ export default function TablesPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>
 
       <Modal
         open={open}
-        title="Create Table"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="table-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Table' : 'Create Table'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="table-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="table-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Name">

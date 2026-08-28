@@ -3,8 +3,10 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Plus, Ruler } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
+import { rowLabel } from '@/lib/tableCrud';
 import { btnPrimary, fieldClass } from '@/lib/ui';
 
 type UnitRow = {
@@ -16,12 +18,15 @@ type UnitRow = {
   updated_at?: string;
 };
 
+const emptyForm = { name: '', symbol: '', type: 'Count' };
+
 export default function UnitsPage() {
   const [items, setItems] = useState<UnitRow[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<UnitRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', symbol: '', type: 'Count' });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const r = await api.get('/inventory/units', { params: { search } });
@@ -34,13 +39,33 @@ export default function UnitsPage() {
 
   const rows = useMemo(() => items, [items]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm(emptyForm);
+    setOpen(true);
+  }
+
+  function openEdit(row: UnitRow) {
+    setEditing(row);
+    setForm({ name: row.name, symbol: row.symbol, type: row.type });
+    setOpen(true);
+  }
+
+  async function onDelete(row: UnitRow) {
+    if (!(await confirmRowDelete(rowLabel(row)))) return;
+    await api.delete(`/inventory/units/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/inventory/units', form);
+      if (editing) await api.put(`/inventory/units/${editing.id}`, form);
+      else await api.post('/inventory/units', form);
       setOpen(false);
-      setForm({ name: '', symbol: '', type: 'Count' });
+      setEditing(null);
+      setForm(emptyForm);
       await load();
     } finally {
       setSaving(false);
@@ -55,7 +80,7 @@ export default function UnitsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button type="button" className={btnPrimary} onClick={() => setOpen(true)}>
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Unit
           </button>
         }
@@ -63,6 +88,10 @@ export default function UnitsPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
             { key: 'symbol', header: 'Symbol', render: (r) => r.symbol },
@@ -81,15 +110,27 @@ export default function UnitsPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>
       <Modal
         open={open}
-        title="Create Unit"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="unit-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Unit' : 'Create Unit'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="unit-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="unit-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Name">

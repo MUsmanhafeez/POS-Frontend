@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Plus, TrendingUp } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
 import { Field, FormActions, Modal } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
@@ -17,6 +17,8 @@ type Row = {
   updated_at?: string;
 };
 
+const emptyForm = { ingredient_id: '', branch_id: '', type: 'in', quantity: '1' };
+
 export default function StockMovementsPage() {
   const [items, setItems] = useState<Row[]>([]);
   const [ingredients, setIngredients] = useState<Array<{ id: string; name: string }>>([]);
@@ -24,7 +26,7 @@ export default function StockMovementsPage() {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ ingredient_id: '', branch_id: '', type: 'in', quantity: '1' });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [m, i, b] = await Promise.all([
@@ -52,6 +54,16 @@ export default function StockMovementsPage() {
     );
   }, [items, search]);
 
+  function openCreate() {
+    setForm({
+      ingredient_id: ingredients[0]?.id || '',
+      branch_id: branches[0]?.id || '',
+      type: 'in',
+      quantity: '1',
+    });
+    setOpen(true);
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -72,19 +84,7 @@ export default function StockMovementsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({
-                ingredient_id: ingredients[0]?.id || '',
-                branch_id: branches[0]?.id || '',
-                type: 'in',
-                quantity: '1',
-              });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Stock Movement
           </button>
         }
@@ -107,7 +107,6 @@ export default function StockMovementsPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>

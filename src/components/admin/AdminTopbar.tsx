@@ -20,6 +20,7 @@ import {
 import clsx from 'clsx';
 import { useAuthStore } from '@/stores/auth';
 import { useLocaleStore, useT } from '@/stores/locale';
+import { useThemeStore } from '@/stores/theme';
 
 type Props = {
   onToggleSidebar?: () => void;
@@ -69,6 +70,7 @@ export default function AdminTopbar({ onToggleSidebar }: Props) {
     setDark(next);
     document.documentElement.classList.toggle('dark', next);
     localStorage.setItem('forkiva-theme', next ? 'dark' : 'light');
+    useThemeStore.getState().refreshSoftVariants();
   }
 
   async function toggleFullscreen() {

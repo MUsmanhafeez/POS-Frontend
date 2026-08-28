@@ -5,6 +5,8 @@ import { Save, RotateCcw } from 'lucide-react';
 import api from '@/lib/api';
 import { Field } from '@/components/ui';
 import { btnPrimary, btnSecondary, fieldClass } from '@/lib/ui';
+import { useThemeStore } from '@/stores/theme';
+import type { AppearanceColors } from '@/lib/theme';
 
 type Props = {
   section: string;
@@ -41,6 +43,17 @@ export default function SettingsFormShell({
       .catch(() => setForm(defaults));
   }, [section]);
 
+  useEffect(() => {
+    if (section !== 'appearance') return;
+    useThemeStore.getState().apply(form as AppearanceColors);
+  }, [form, section]);
+
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(() => setMessage(''), 4000);
+    return () => clearTimeout(t);
+  }, [message]);
+
   function set(key: string, value: unknown) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
@@ -51,7 +64,10 @@ export default function SettingsFormShell({
     setMessage('');
     try {
       await api.put(`/settings/${section}`, form);
-      setMessage('Saved successfully');
+      if (section === 'appearance') {
+        useThemeStore.getState().apply(form as AppearanceColors);
+      }
+      setMessage('Settings has been updated successfully.');
     } catch (err: unknown) {
       setMessage((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Save failed');
     } finally {
@@ -61,6 +77,9 @@ export default function SettingsFormShell({
 
   function onReset() {
     setForm(defaults);
+    if (section === 'appearance') {
+      useThemeStore.getState().apply(defaults as AppearanceColors);
+    }
   }
 
   return (
@@ -86,7 +105,11 @@ export default function SettingsFormShell({
         <button type="submit" className={btnPrimary} disabled={saving}>
           <Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save'}
         </button>
-        {message && <span className="text-sm font-semibold text-success">{message}</span>}
+      {message ? (
+        <div className="fixed end-4 top-4 z-50 rounded-xl border border-success/30 bg-success-soft px-4 py-3 text-sm font-semibold text-success shadow-lg">
+          {message}
+        </div>
+      ) : null}
       </div>
     </form>
   );

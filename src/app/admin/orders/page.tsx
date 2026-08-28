@@ -46,6 +46,26 @@ export default function OrdersPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            extra: [
+              {
+                key: 'void',
+                label: 'Void',
+                onClick: () => {
+                  setPending({ id: row.id, action: 'void' });
+                  setPinOpen(true);
+                },
+              },
+              {
+                key: 'refund',
+                label: 'Refund',
+                onClick: () => {
+                  setPending({ id: row.id, action: 'refund', amount: Number(row.total || 0) });
+                  setPinOpen(true);
+                },
+              },
+            ],
+          })}
           columns={[
             { key: 'customer', header: 'Customer', render: (r) => r.customer || 'Walk-in' },
             { key: 'ref', header: 'Reference No', render: (r) => <span className="font-medium">{r.reference_no || r.referenceNo || '—'}</span> },
@@ -62,34 +82,6 @@ export default function OrdersPage() {
               key: 'created',
               header: 'Created at',
               render: (r) => String(r.created_at || r.createdAt || '—').replace('T', ' ').slice(0, 19),
-            },
-            {
-              key: 'actions',
-              header: 'Actions',
-              render: (r) => (
-                <div className="flex gap-2 text-xs">
-                  <button
-                    type="button"
-                    className="text-rose-600"
-                    onClick={() => {
-                      setPending({ id: r.id, action: 'void' });
-                      setPinOpen(true);
-                    }}
-                  >
-                    Void
-                  </button>
-                  <button
-                    type="button"
-                    className="text-amber-600"
-                    onClick={() => {
-                      setPending({ id: r.id, action: 'refund', amount: Number(r.total || 0) });
-                      setPinOpen(true);
-                    }}
-                  >
-                    Refund
-                  </button>
-                </div>
-              ),
             },
           ]}
         />

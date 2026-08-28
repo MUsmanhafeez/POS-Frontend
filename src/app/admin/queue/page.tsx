@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { Ticket } from 'lucide-react';
 import api from '@/lib/api';
+import { SectionTabs } from '@/components/admin/SectionTabs';
+import { TOOLS_TABS } from '@/lib/nav';
 import { Card } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
@@ -78,6 +80,8 @@ export default function QueuePage() {
           </button>
         </div>
       </div>
+
+      <SectionTabs tabs={[...TOOLS_TABS]} />
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="p-4">

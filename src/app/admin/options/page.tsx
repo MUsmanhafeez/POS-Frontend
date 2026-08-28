@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ListTree, Plus } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
@@ -12,22 +13,27 @@ type OptionRow = {
   name: unknown;
   branch?: unknown;
   type?: string;
+  menu_id?: string;
+  menuId?: string;
+  is_required?: boolean;
   created_at?: string;
   updated_at?: string;
   createdAt?: string;
   updatedAt?: string;
-  menuId?: string;
 };
 
 type Menu = { id: string; name: unknown };
+
+const emptyForm = { name: '', menu_id: '', is_required: false, value_name: '', value_price: '0' };
 
 export default function OptionsPage() {
   const [items, setItems] = useState<OptionRow[]>([]);
   const [menus, setMenus] = useState<Menu[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<OptionRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', menu_id: '', is_required: false, value_name: '', value_price: '0' });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [o, m] = await Promise.all([
@@ -44,18 +50,44 @@ export default function OptionsPage() {
 
   const rows = useMemo(() => items, [items]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm({ ...emptyForm, menu_id: menus[0]?.id || '' });
+    setOpen(true);
+  }
+
+  function openEdit(row: OptionRow) {
+    setEditing(row);
+    setForm({
+      name: labelOf(row.name),
+      menu_id: row.menu_id || row.menuId || '',
+      is_required: Boolean(row.is_required),
+      value_name: '',
+      value_price: '0',
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: OptionRow) {
+    if (!(await confirmRowDelete(labelOf(row.name)))) return;
+    await api.delete(`/options/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/options', {
+      const payload = {
         name: form.name,
         menu_id: form.menu_id || null,
         is_required: form.is_required,
         values: [{ name: form.value_name || form.name, price: Number(form.value_price || 0) }],
-      });
+      };
+      if (editing) await api.put(`/options/${editing.id}`, payload);
+      else await api.post('/options', payload);
       setOpen(false);
-      setForm({ name: '', menu_id: menus[0]?.id || '', is_required: false, value_name: '', value_price: '0' });
+      setEditing(null);
       await load();
     } catch (err) {
       console.error(err);
@@ -72,14 +104,7 @@ export default function OptionsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({ name: '', menu_id: menus[0]?.id || '', is_required: false, value_name: '', value_price: '0' });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Option
           </button>
         }
@@ -87,6 +112,10 @@ export default function OptionsPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{labelOf(r.name)}</span> },
             { key: 'branch', header: 'Branch', render: (r) => labelOf(r.branch) || '—' },
@@ -101,16 +130,28 @@ export default function OptionsPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || r.updatedAt || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>
 
       <Modal
         open={open}
-        title="Create Option"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="option-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Option' : 'Create Option'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="option-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="option-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Name">

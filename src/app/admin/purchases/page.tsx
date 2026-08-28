@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { FileText, Plus } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
 import { Field, FormActions, Modal } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
@@ -18,6 +18,15 @@ type Row = {
   created_at?: string;
 };
 
+const emptyForm = {
+  reference_no: '',
+  branch_id: '',
+  supplier_id: '',
+  total: '0',
+  status: 'pending',
+  expected_at: '',
+};
+
 export default function PurchasesPage() {
   const [items, setItems] = useState<Row[]>([]);
   const [branches, setBranches] = useState<Array<{ id: string; name: unknown }>>([]);
@@ -25,14 +34,7 @@ export default function PurchasesPage() {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    reference_no: '',
-    branch_id: '',
-    supplier_id: '',
-    total: '0',
-    status: 'pending',
-    expected_at: '',
-  });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [p, b, s] = await Promise.all([
@@ -50,6 +52,15 @@ export default function PurchasesPage() {
   }, [search]);
 
   const rows = useMemo(() => items, [items]);
+
+  function openCreate() {
+    setForm({
+      ...emptyForm,
+      branch_id: branches[0]?.id || '',
+      supplier_id: suppliers[0]?.id || '',
+    });
+    setOpen(true);
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -76,21 +87,7 @@ export default function PurchasesPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({
-                reference_no: '',
-                branch_id: branches[0]?.id || '',
-                supplier_id: suppliers[0]?.id || '',
-                total: '0',
-                status: 'pending',
-                expected_at: '',
-              });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Purchase
           </button>
         }
@@ -114,7 +111,6 @@ export default function PurchasesPage() {
               header: 'Created at',
               render: (r) => String(r.created_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>

@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Globe2, Plus, QrCode } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
@@ -11,7 +12,9 @@ type OnlineMenuRow = {
   id: string;
   name: unknown;
   branch?: unknown;
+  branch_id?: string;
   menu?: unknown;
+  menu_id?: string;
   slug?: string;
   is_active?: boolean;
   qrcode?: string | null;
@@ -22,6 +25,8 @@ type OnlineMenuRow = {
 type Branch = { id: string; name: unknown };
 type Menu = { id: string; name: unknown };
 
+const emptyForm = { name: '', branch_id: '', menu_id: '', slug: '', is_active: true };
+
 export default function OnlineMenusPage() {
   const [items, setItems] = useState<OnlineMenuRow[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -29,7 +34,7 @@ export default function OnlineMenusPage() {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', branch_id: '', menu_id: '', slug: '', is_active: true });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [om, b, m] = await Promise.all([
@@ -48,13 +53,28 @@ export default function OnlineMenusPage() {
 
   const rows = useMemo(() => items, [items]);
 
+  function openCreate() {
+    setForm({
+      ...emptyForm,
+      branch_id: branches[0]?.id || '',
+      menu_id: menus[0]?.id || '',
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: OnlineMenuRow) {
+    if (!(await confirmRowDelete(labelOf(row.name)))) return;
+    await api.delete(`/online-menus/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
       await api.post('/online-menus', form);
       setOpen(false);
-      setForm({ name: '', branch_id: branches[0]?.id || '', menu_id: menus[0]?.id || '', slug: '', is_active: true });
+      setForm({ ...emptyForm, branch_id: branches[0]?.id || '', menu_id: menus[0]?.id || '' });
       await load();
     } catch (err) {
       console.error(err);
@@ -71,20 +91,7 @@ export default function OnlineMenusPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({
-                name: '',
-                branch_id: branches[0]?.id || '',
-                menu_id: menus[0]?.id || '',
-                slug: '',
-                is_active: true,
-              });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Online menu
           </button>
         }
@@ -92,6 +99,9 @@ export default function OnlineMenusPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{labelOf(r.name)}</span> },
             { key: 'branch', header: 'Branch', render: (r) => labelOf(r.branch) || '—' },
@@ -124,7 +134,6 @@ export default function OnlineMenusPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>

@@ -38,6 +38,11 @@ export default function RolesPage() {
     return r.name.includes(q) || String(r.display_name || r.displayName || '').toLowerCase().includes(q);
   });
 
+  function openEdit(row: Role) {
+    setEdit(row);
+    setPermsText((row.permissions || []).join('\n'));
+  }
+
   async function onSave(e: FormEvent) {
     e.preventDefault();
     if (!edit) return;
@@ -64,26 +69,13 @@ export default function RolesPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No roles"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => r.name },
             { key: 'display', header: 'Display', render: (r) => r.display_name || r.displayName || '—' },
             { key: 'perms', header: 'Permissions', render: (r) => String((r.permissions || []).length) },
-            {
-              key: 'actions',
-              header: '',
-              render: (r) => (
-                <button
-                  type="button"
-                  className="text-sm text-brand"
-                  onClick={() => {
-                    setEdit(r);
-                    setPermsText((r.permissions || []).join('\n'));
-                  }}
-                >
-                  Edit
-                </button>
-              ),
-            },
           ]}
         />
       </AdminListShell>

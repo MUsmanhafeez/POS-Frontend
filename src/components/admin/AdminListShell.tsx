@@ -1,8 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Filter, MoreVertical, Search } from 'lucide-react';
+import { Filter, Search } from 'lucide-react';
 import { Badge, Card, EmptyState, PageHeader } from '@/components/ui';
+import { RowActionsMenu, type TableRowActions } from '@/components/admin/RowActionsMenu';
+import { SectionTabs, type SectionTab } from '@/components/admin/SectionTabs';
 import { fieldClass } from '@/lib/ui';
 import { useT } from '@/stores/locale';
 
@@ -19,6 +21,7 @@ export function AdminListShell({
   action,
   search,
   onSearch,
+  tabs,
   children,
 }: {
   title: string;
@@ -26,6 +29,7 @@ export function AdminListShell({
   action?: React.ReactNode;
   search: string;
   onSearch: (v: string) => void;
+  tabs?: readonly SectionTab[];
   children: React.ReactNode;
 }) {
   const t = useT();
@@ -42,6 +46,7 @@ export function AdminListShell({
           {t('Home')} &gt; {titleLabel}
         </div>
       </div>
+      {tabs?.length ? <SectionTabs tabs={[...tabs]} /> : null}
       {action && <div className="mb-4 flex justify-end">{action}</div>}
       <div className="mb-3 flex justify-end gap-2">
         <div className="relative w-full max-w-xs">
@@ -65,17 +70,33 @@ export function AdminListShell({
 export function AdminPagedTable<T extends { id: string }>({
   rows,
   columns,
+  rowActions,
   emptyTitle = 'No data available',
   pageSizeOptions = [10, 25, 50],
 }: {
   rows: T[];
   columns: AdminColumn<T>[];
+  rowActions?: TableRowActions<T>;
   emptyTitle?: string;
   pageSizeOptions?: number[];
 }) {
   const t = useT();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(pageSizeOptions[0] || 10);
+
+  const tableColumns = useMemo(() => {
+    if (!rowActions) return columns;
+    const withoutActions = columns.filter((c) => c.key !== 'actions');
+    return [
+      ...withoutActions,
+      {
+        key: 'actions',
+        header: 'Actions',
+        className: 'w-16',
+        render: (row: T) => <RowActionsMenu actions={rowActions(row)} />,
+      },
+    ];
+  }, [columns, rowActions]);
 
   const total = rows.length;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -102,11 +123,11 @@ export function AdminPagedTable<T extends { id: string }>({
 
   return (
     <Card>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto overflow-y-visible">
         <table className="w-full min-w-[900px] text-start text-sm">
           <thead className="bg-surface-muted text-muted">
             <tr>
-              {columns.map((c) => (
+              {tableColumns.map((c) => (
                 <th key={c.key} className={`px-4 py-3 font-semibold ${c.className || ''}`}>
                   {t(c.header)}
                 </th>
@@ -116,7 +137,7 @@ export function AdminPagedTable<T extends { id: string }>({
           <tbody>
             {slice.map((row) => (
               <tr key={row.id} className="border-t border-border text-foreground">
-                {columns.map((c) => (
+                {tableColumns.map((c) => (
                   <td key={c.key} className={`px-4 py-3 align-middle ${c.className || ''}`}>
                     {c.render(row)}
                   </td>
@@ -183,14 +204,7 @@ export function AdminPagedTable<T extends { id: string }>({
   );
 }
 
-export function ActionsMenu() {
-  const t = useT();
-  return (
-    <button type="button" className="rounded-lg p-1.5 text-muted hover:bg-surface-muted" aria-label={t('Actions')}>
-      <MoreVertical className="h-4 w-4" />
-    </button>
-  );
-}
+export { RowActionsMenu, confirmRowDelete, type RowActionsConfig, type TableRowActions } from '@/components/admin/RowActionsMenu';
 
 export function StatusBadge({ value }: { value?: string }) {
   const t = useT();

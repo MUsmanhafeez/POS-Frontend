@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Layers, Plus } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
@@ -11,6 +12,7 @@ type FloorRow = {
   id: string;
   name: unknown;
   branch?: unknown;
+  branch_id?: string;
   isActive?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -18,13 +20,16 @@ type FloorRow = {
 
 type Branch = { id: string; name: unknown };
 
+const emptyForm = { name: '', branch_id: '', is_active: true };
+
 export default function FloorsPage() {
   const [items, setItems] = useState<FloorRow[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<FloorRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', branch_id: '', is_active: true });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [f, b] = await Promise.all([
@@ -41,12 +46,36 @@ export default function FloorsPage() {
 
   const rows = useMemo(() => items, [items]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm({ ...emptyForm, branch_id: branches[0]?.id || '' });
+    setOpen(true);
+  }
+
+  function openEdit(row: FloorRow) {
+    setEditing(row);
+    setForm({
+      name: labelOf(row.name),
+      branch_id: row.branch_id || '',
+      is_active: row.isActive !== false,
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: FloorRow) {
+    if (!(await confirmRowDelete(labelOf(row.name)))) return;
+    await api.delete(`/floors/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/floors', form);
+      if (editing) await api.put(`/floors/${editing.id}`, form);
+      else await api.post('/floors', form);
       setOpen(false);
+      setEditing(null);
       await load();
     } catch (err) {
       console.error(err);
@@ -63,14 +92,7 @@ export default function FloorsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({ name: '', branch_id: branches[0]?.id || '', is_active: true });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Floor
           </button>
         }
@@ -78,6 +100,10 @@ export default function FloorsPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{labelOf(r.name)}</span> },
             { key: 'branch', header: 'Branch', render: (r) => labelOf(r.branch) || '—' },
@@ -96,16 +122,28 @@ export default function FloorsPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>
 
       <Modal
         open={open}
-        title="Create Floor"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="floor-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Floor' : 'Create Floor'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="floor-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="floor-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Name">

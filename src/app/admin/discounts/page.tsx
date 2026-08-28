@@ -3,14 +3,17 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Percent, Plus } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable, StatusBadge } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
+import { rowLabel } from '@/lib/tableCrud';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
 type Row = {
   id: string;
   name: string;
   branch?: unknown;
+  branch_id?: string;
   type?: string;
   value?: number;
   used?: number;
@@ -19,13 +22,16 @@ type Row = {
   updated_at?: string;
 };
 
+const emptyForm = { name: '', branch_id: '', type: 'percent', value: '10', is_active: true };
+
 export default function DiscountsPage() {
   const [items, setItems] = useState<Row[]>([]);
   const [branches, setBranches] = useState<Array<{ id: string; name: unknown }>>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Row | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', branch_id: '', type: 'percent', value: '10', is_active: true });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [d, b] = await Promise.all([
@@ -42,12 +48,39 @@ export default function DiscountsPage() {
 
   const rows = useMemo(() => items, [items]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm(emptyForm);
+    setOpen(true);
+  }
+
+  function openEdit(row: Row) {
+    setEditing(row);
+    setForm({
+      name: row.name,
+      branch_id: row.branch_id || '',
+      type: row.type || 'percent',
+      value: String(row.value ?? 0),
+      is_active: row.is_active !== false,
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: Row) {
+    if (!(await confirmRowDelete(rowLabel(row)))) return;
+    await api.delete(`/promotions/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/discounts', { ...form, value: Number(form.value || 0) });
+      const payload = { ...form, value: Number(form.value || 0) };
+      if (editing) await api.put(`/promotions/${editing.id}`, payload);
+      else await api.post('/discounts', payload);
       setOpen(false);
+      setEditing(null);
       await load();
     } finally {
       setSaving(false);
@@ -62,14 +95,7 @@ export default function DiscountsPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({ name: '', branch_id: '', type: 'percent', value: '10', is_active: true });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Discount
           </button>
         }
@@ -77,6 +103,10 @@ export default function DiscountsPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
             { key: 'branch', header: 'Branch', render: (r) => labelOf(r.branch) || '—' },
@@ -105,15 +135,27 @@ export default function DiscountsPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>
       <Modal
         open={open}
-        title="Create Discount"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="discount-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Discount' : 'Create Discount'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="discount-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="discount-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Name">

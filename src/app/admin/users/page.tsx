@@ -1,10 +1,11 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import api from '@/lib/api';
+import { RowActionsMenu, confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Badge, DataTable, Field, FormActions, Modal, PageHeader } from '@/components/ui';
-import { btnGhost, btnPrimary, fieldClass } from '@/lib/ui';
+import { btnPrimary, fieldClass } from '@/lib/ui';
 
 type UserRow = {
   id: string;
@@ -87,7 +88,7 @@ export default function UsersPage() {
   }
 
   async function onDelete(row: UserRow) {
-    if (!confirm(`Delete user “${row.name}”?`)) return;
+    if (!(await confirmRowDelete(row.name))) return;
     await api.delete(`/users/${row.id}`);
     await load();
   }
@@ -120,16 +121,14 @@ export default function UsersPage() {
           {
             key: 'actions',
             header: 'Actions',
-            className: 'w-28',
+            className: 'w-16',
             render: (r) => (
-              <div className="flex justify-end gap-1">
-                <button type="button" className={btnGhost} onClick={() => openEdit(r)} aria-label="Edit">
-                  <Pencil className="h-4 w-4" />
-                </button>
-                <button type="button" className={btnGhost} onClick={() => onDelete(r)} aria-label="Delete">
-                  <Trash2 className="h-4 w-4 text-danger" />
-                </button>
-              </div>
+              <RowActionsMenu
+                actions={{
+                  onEdit: () => openEdit(r),
+                  onDelete: () => onDelete(r),
+                }}
+              />
             ),
           },
         ]}

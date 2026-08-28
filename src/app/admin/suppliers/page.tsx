@@ -3,27 +3,33 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Plus, ShoppingCart } from 'lucide-react';
 import api from '@/lib/api';
-import { ActionsMenu, AdminListShell, AdminPagedTable } from '@/components/admin/AdminListShell';
+import { AdminListShell, AdminPagedTable } from '@/components/admin/AdminListShell';
+import { confirmRowDelete } from '@/components/admin/RowActionsMenu';
 import { Field, FormActions, Modal } from '@/components/ui';
+import { rowLabel } from '@/lib/tableCrud';
 import { btnPrimary, fieldClass, labelOf } from '@/lib/ui';
 
 type SupplierRow = {
   id: string;
   name: string;
   branch?: unknown;
+  branch_id?: string;
   phone?: string;
   email?: string;
   created_at?: string;
   updated_at?: string;
 };
 
+const emptyForm = { name: '', branch_id: '', phone: '', email: '' };
+
 export default function SuppliersPage() {
   const [items, setItems] = useState<SupplierRow[]>([]);
   const [branches, setBranches] = useState<Array<{ id: string; name: unknown }>>([]);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<SupplierRow | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', branch_id: '', phone: '', email: '' });
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     const [s, b] = await Promise.all([
@@ -40,12 +46,37 @@ export default function SuppliersPage() {
 
   const rows = useMemo(() => items, [items]);
 
+  function openCreate() {
+    setEditing(null);
+    setForm({ ...emptyForm, branch_id: branches[0]?.id || '' });
+    setOpen(true);
+  }
+
+  function openEdit(row: SupplierRow) {
+    setEditing(row);
+    setForm({
+      name: row.name,
+      branch_id: row.branch_id || '',
+      phone: row.phone || '',
+      email: row.email || '',
+    });
+    setOpen(true);
+  }
+
+  async function onDelete(row: SupplierRow) {
+    if (!(await confirmRowDelete(rowLabel(row)))) return;
+    await api.delete(`/inventory/suppliers/${row.id}`);
+    await load();
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post('/inventory/suppliers', form);
+      if (editing) await api.put(`/inventory/suppliers/${editing.id}`, form);
+      else await api.post('/inventory/suppliers', form);
       setOpen(false);
+      setEditing(null);
       await load();
     } finally {
       setSaving(false);
@@ -60,14 +91,7 @@ export default function SuppliersPage() {
         search={search}
         onSearch={setSearch}
         action={
-          <button
-            type="button"
-            className={btnPrimary}
-            onClick={() => {
-              setForm({ name: '', branch_id: branches[0]?.id || '', phone: '', email: '' });
-              setOpen(true);
-            }}
-          >
+          <button type="button" className={btnPrimary} onClick={openCreate}>
             <Plus className="h-4 w-4" /> Create Supplier
           </button>
         }
@@ -75,6 +99,10 @@ export default function SuppliersPage() {
         <AdminPagedTable
           rows={rows}
           emptyTitle="No data available"
+          rowActions={(row) => ({
+            onEdit: () => openEdit(row),
+            onDelete: () => onDelete(row),
+          })}
           columns={[
             { key: 'name', header: 'Name', render: (r) => <span className="font-medium">{r.name}</span> },
             { key: 'branch', header: 'Branch', render: (r) => labelOf(r.branch) || '—' },
@@ -90,15 +118,27 @@ export default function SuppliersPage() {
               header: 'Updated at',
               render: (r) => String(r.updated_at || '—').replace('T', ' ').slice(0, 19),
             },
-            { key: 'actions', header: 'Actions', render: () => <ActionsMenu /> },
           ]}
         />
       </AdminListShell>
       <Modal
         open={open}
-        title="Create Supplier"
-        onClose={() => setOpen(false)}
-        footer={<FormActions formId="supplier-form" onCancel={() => setOpen(false)} saving={saving} submitLabel="Create" />}
+        title={editing ? 'Edit Supplier' : 'Create Supplier'}
+        onClose={() => {
+          setOpen(false);
+          setEditing(null);
+        }}
+        footer={
+          <FormActions
+            formId="supplier-form"
+            onCancel={() => {
+              setOpen(false);
+              setEditing(null);
+            }}
+            saving={saving}
+            submitLabel={editing ? 'Update' : 'Create'}
+          />
+        }
       >
         <form id="supplier-form" onSubmit={onSubmit} className="space-y-3">
           <Field label="Name">
