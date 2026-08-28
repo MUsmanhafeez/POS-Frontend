@@ -1,36 +1,96 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Forkiva Admin & POS (Frontend)
 
-## Getting Started
+Next.js 15 (App Router) admin panel and POS UI for Forkiva. Talks to the Express API over `/api/v1`.
 
-First, run the development server:
+**Stack:** Next.js 15 · React 19 · Tailwind CSS 4 · Zustand · Axios · Lucide
+
+## Prerequisites
+
+- Node.js 20+
+- Backend API running (default `http://127.0.0.1:4000`)
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd frontend
+# create .env.local (see Environment below)
+npm install
+npm run dev          # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Environment
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Create `.env.local`:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+NEXT_PUBLIC_API_URL=http://127.0.0.1:4000/api/v1
+```
 
-## Learn More
+| Variable | Default | Notes |
+|----------|---------|--------|
+| `NEXT_PUBLIC_API_URL` | `http://127.0.0.1:4000/api/v1` | Backend API base URL |
 
-To learn more about Next.js, take a look at the following resources:
+Env files matching `.env*` are gitignored.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Scripts
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Dev server with Turbopack |
+| `npm run build` | Production build (Turbopack) |
+| `npm start` | Serve production build |
+| `npm run lint` | ESLint |
 
-## Deploy on Vercel
+## Default login
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Requires a seeded backend:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Email:** `admin@forkiva.app`
+- **Password:** `12345678`
+
+Login page: [http://localhost:3000/auth/login](http://localhost:3000/auth/login)
+
+## What’s included
+
+- Auth (login) + JWT session in the client
+- Admin shell with permission-aware navigation
+- Dashboard, orders, invoices, POS registers / order taker
+- Menus, products, categories, seating (floors / zones / tables)
+- Inventory-related screens, discounts/vouchers, taxes, branches
+- Users & roles, reports, activity / authentication logs
+- Tools (including database tools), translations, theme support
+
+## Project layout
+
+```
+frontend/
+  src/
+    app/
+      auth/login/          # Login
+      admin/               # Admin pages (orders, POS, reports, …)
+      order/               # Order-related routes
+    components/
+      admin/               # Shared admin UI (list shell, topbar, …)
+      pos/                 # POS modules
+    lib/
+      api.ts               # Axios client
+      nav.ts               # Admin navigation
+      reports/             # Report catalog
+      i18n/                # Messages
+    stores/                # Zustand (auth, theme, …)
+```
+
+## Pair with backend
+
+```bash
+cd ../backend
+npm run db:install && npm run seed && npm run dev
+```
+
+Then open the frontend at [http://localhost:3000](http://localhost:3000).
+
+## Troubleshooting
+
+- **API errors / CORS:** Confirm backend `CORS_ORIGIN` includes `http://localhost:3000` and `NEXT_PUBLIC_API_URL` points at the API.
+- **Turbopack / `.next` glitches:** Stop the dev server, run `rm -rf .next`, then `npm run dev` again.
+- **Empty data:** Seed the backend with `npm run seed` from the `backend` folder.

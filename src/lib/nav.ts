@@ -62,6 +62,7 @@ export const ADMIN_NAV: NavSection[] = [
         permission: 'admin.pos_registers.index',
         children: [
           { href: '/admin/pos', label: 'Order Taker' },
+          { href: '/admin/kitchen', label: 'Kitchen Viewer' },
           { href: '/admin/pos/opening-closing', label: 'Opening & Closing' },
           { href: '/admin/pos/registers', label: 'Registers' },
           { href: '/admin/shifts', label: 'Shifts' },
