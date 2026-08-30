@@ -11,7 +11,15 @@ const DENOMS = [5000, 1000, 500, 100, 50, 20, 10, 5, 2, 1];
 type Branch = { id: string; name: unknown };
 type Register = { id: string; name: unknown; code?: string; branchId?: string };
 type Shift = { id: string; name: string; code?: string };
-type Session = { id: string; status?: string; openingFloat?: number; openedAt?: string };
+type Session = {
+  id: string;
+  status?: string;
+  openingFloat?: number;
+  openedAt?: string;
+  expectedCash?: number;
+  variance?: number;
+  closingCash?: number;
+};
 
 export default function OpeningClosingPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -28,6 +36,7 @@ export default function OpeningClosingPage() {
     return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
   });
   const [session, setSession] = useState<Session | null>(null);
+  const [closeSummary, setCloseSummary] = useState<{ expectedCash?: number; variance?: number; closingCash?: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -107,18 +116,33 @@ export default function OpeningClosingPage() {
     setBusy(true);
     setMessage('');
     try {
-      await api.post(`/pos/sessions/${session.id}/close`, {
+      const { data } = await api.post(`/pos/sessions/${session.id}/close`, {
         closing_cash: total,
         notes: `Cash count total: ${total}`,
       });
       setCounts(Object.fromEntries(DENOMS.map((d) => [d, ''])));
       setSession(null);
+      setCloseSummary({
+        expectedCash: Number(data.body.expectedCash ?? data.body.expected_cash ?? 0),
+        variance: Number(data.body.variance ?? 0),
+        closingCash: total,
+      });
       setMessage('Session closed');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       setMessage(e.response?.data?.message || 'Failed to close session');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runZReport() {
+    if (!session?.id) return;
+    try {
+      const { data } = await api.get('/reports/xz', { params: { type: 'Z', session_id: session.id, register_id: registerId } });
+      setMessage(`Z Report · sales ${Number(data.body.sales?.sales_total || 0).toLocaleString()}`);
+    } catch {
+      setMessage('Could not load Z report');
     }
   }
 
@@ -218,6 +242,9 @@ export default function OpeningClosingPage() {
                 <button type="button" className={`${btnPrimary} w-full justify-center`} disabled={busy} onClick={openSession}>
                   Open Session
                 </button>
+                <button type="button" className={`${btnPrimary} w-full justify-center`} disabled={busy || !session} onClick={runZReport}>
+                  Z Report
+                </button>
                 <button type="button" className={`${btnPrimary} w-full justify-center`} disabled={busy} onClick={closeSession}>
                   Close Session
                 </button>
@@ -241,6 +268,16 @@ export default function OpeningClosingPage() {
                   <span className="font-bold tracking-wide text-foreground">NO OPEN SESSION</span>
                 )}
               </div>
+              {closeSummary ? (
+                <div className="mt-3 rounded-xl border border-border bg-surface-muted p-3 text-sm">
+                  <div className="font-bold text-foreground">Close summary</div>
+                  <div className="mt-1 text-muted">Counted: {closeSummary.closingCash?.toLocaleString()}</div>
+                  <div className="text-muted">Expected: {closeSummary.expectedCash?.toLocaleString()}</div>
+                  <div className={closeSummary.variance === 0 ? 'text-emerald-600 font-bold' : 'text-rose-600 font-bold'}>
+                    Variance: {closeSummary.variance?.toLocaleString()}
+                  </div>
+                </div>
+              ) : null}
               {message ? <p className="mt-2 text-sm text-muted">{message}</p> : null}
             </div>
           </div>

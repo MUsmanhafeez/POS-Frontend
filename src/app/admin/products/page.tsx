@@ -26,7 +26,7 @@ type ProductRow = {
 
 type Menu = { id: string; name: unknown };
 
-const emptyForm = { name: '', price: '', menu_id: '', sku: '', is_active: true };
+const emptyForm = { name: '', price: '', menu_id: '', sku: '', is_active: true, station: 'grill' };
 
 export default function ProductsPage() {
   const [items, setItems] = useState<ProductRow[]>([]);
@@ -66,6 +66,7 @@ export default function ProductsPage() {
       menu_id: row.menu_id || row.menuId || '',
       sku: row.sku || '',
       is_active: row.isActive !== false && row.is_active !== false,
+      station: (row as { station?: string }).station || 'grill',
     });
     setOpen(true);
   }
@@ -206,6 +207,14 @@ export default function ProductsPage() {
           </Field>
           <Field label="SKU">
             <input className={fieldClass} value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
+          </Field>
+          <Field label="Kitchen station">
+            <select className={fieldClass} value={form.station} onChange={(e) => setForm({ ...form, station: e.target.value })}>
+              <option value="grill">Grill</option>
+              <option value="bar">Bar</option>
+              <option value="cold">Cold</option>
+              <option value="dessert">Dessert</option>
+            </select>
           </Field>
           <label className="flex items-center gap-2 text-sm">
             <input

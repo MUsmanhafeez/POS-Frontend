@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Boxes,
+  ChefHat,
   CreditCard,
   FileText,
   Package,
@@ -57,11 +58,22 @@ export const REPORT_CATALOG: ReportDef[] = [
   { slug: 'register-summary', title: 'Register Summary Report', description: 'Financial summary of POS registers and sessions.', category: 'pos', icon: CreditCard },
   { slug: 'cash-register-difference', title: 'Cash Register Difference', description: 'Opening float, sales, movements, and declared cash variance.', category: 'pos', icon: CreditCard },
   { slug: 'till-shift-sales', title: 'Till / Shift Wise Sales Report', description: 'Sales totals grouped by shift session.', category: 'pos', icon: BarChart3 },
+  { slug: 'x-report', title: 'X Report (Mid-Shift)', description: 'Mid-shift sales snapshot without reset.', category: 'pos', icon: CreditCard },
+  { slug: 'z-report', title: 'Z Report (End of Day)', description: 'End-of-day close summary.', category: 'pos', icon: CreditCard },
   { slug: 'ingredient-usage', title: 'Ingredient Usage Report', description: 'Ingredient consumption based on sold products.', category: 'inventory', icon: Boxes },
   { slug: 'low-stock-alerts', title: 'Low Stock Alerts', description: 'Ingredients and items nearing depletion.', category: 'inventory', icon: Boxes },
   { slug: 'tentative-stock', title: 'Tentative Stock in Hand', description: 'Opening stock, consumption, balance, and value.', category: 'inventory', icon: Boxes },
   { slug: 'materials-balance', title: 'Materials Balance Analysis', description: 'Opening, purchase, consumption, waste, and balance.', category: 'inventory', icon: Boxes },
   { slug: 'categorized-products', title: 'Categorized Products Report', description: 'Each category with total product count.', category: 'system', icon: Package },
+  { slug: 'category-sales', title: 'Category-wise Sales', description: 'Revenue and quantity by menu category.', category: 'restaurant-sales', icon: BarChart3 },
+  { slug: 'order-type-breakdown', title: 'Order Type Breakdown', description: 'Orders and revenue grouped by service type.', category: 'restaurant-sales', icon: BarChart3 },
+  { slug: 'aov-trend', title: 'Average Order Value Trend', description: 'Daily AOV over the selected period.', category: 'restaurant-sales', icon: TrendingUp },
+  { slug: 'void-discount-manager', title: 'Void, Discount & Manager Summary', description: 'Voids and discount totals in one view.', category: 'pos', icon: FileText },
+  { slug: 'loyalty-summary', title: 'Loyalty Earned / Redeemed', description: 'Points earned and redeemed from loyalty program.', category: 'restaurant-sales', icon: Users },
+  { slug: 'hourly-heatmap', title: 'Hourly Sales Heatmap', description: 'Orders and revenue by hour and day.', category: 'restaurant-sales', icon: BarChart3 },
+  { slug: 'table-turnover', title: 'Table Turnover', description: 'Dine-in turns and average minutes per table.', category: 'restaurant-sales', icon: Store },
+  { slug: 'manager-override-log', title: 'Manager Override Log', description: 'Voids, refunds, discounts, and PIN approvals.', category: 'system', icon: FileText },
+  { slug: 'kitchen-aging', title: 'Kitchen Aging Report', description: 'Items stuck in queued or in-prep beyond threshold.', category: 'pos', icon: ChefHat },
 ];
 
 export function reportBySlug(slug: string) {

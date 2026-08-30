@@ -1,9 +1,32 @@
 'use client';
 
 import { Mail } from 'lucide-react';
+import { useState } from 'react';
+import api from '@/lib/api';
+import { useAuthStore } from '@/stores/auth';
 import SettingsFormShell, { FloatingField, fieldClass } from '@/components/admin/SettingsFormShell';
+import { btnSecondary } from '@/lib/ui';
 
 export default function MailSettingsPage() {
+  const { user } = useAuthStore();
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState('');
+
+  async function sendTestEmail() {
+    setTesting(true);
+    setTestResult('');
+    try {
+      await api.post('/settings/mail/test', { to: user?.email });
+      setTestResult('Test email sent (or logged in dev mode).');
+    } catch (err: unknown) {
+      setTestResult(
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Test email failed'
+      );
+    } finally {
+      setTesting(false);
+    }
+  }
+
   return (
     <SettingsFormShell
       section="mail"
@@ -19,6 +42,17 @@ export default function MailSettingsPage() {
         mail_password: '',
         mail_encryption: '',
       }}
+      banner={
+        <div className="rounded-xl border border-border bg-surface-muted/40 p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className={btnSecondary} disabled={testing} onClick={sendTestEmail}>
+              {testing ? 'Sending…' : 'Send test email'}
+            </button>
+            <span className="text-sm text-muted">Sends to {user?.email || 'your account email'}</span>
+          </div>
+          {testResult && <p className="mt-2 text-sm text-foreground">{testResult}</p>}
+        </div>
+      }
     >
       {({ form, set }) => (
         <div className="grid gap-4 sm:grid-cols-2">

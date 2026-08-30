@@ -10,7 +10,7 @@ type Props = {
   open: boolean;
   title?: string;
   onClose: () => void;
-  onVerified: (approver: { id: string; name: string }) => void;
+  onVerified: (approver: { id: string; name: string }, pin?: string) => void;
 };
 
 export default function ManagerPinModal({ open, title, onClose, onVerified }: Props) {
@@ -25,7 +25,7 @@ export default function ManagerPinModal({ open, title, onClose, onVerified }: Pr
     setError('');
     try {
       const { data } = await api.post('/auth/verify-pin', { pin });
-      onVerified({ id: data.body.approver_id, name: data.body.approver_name });
+      onVerified({ id: data.body.approver_id, name: data.body.approver_name }, pin);
       setPin('');
       onClose();
     } catch {

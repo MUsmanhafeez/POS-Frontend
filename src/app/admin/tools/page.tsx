@@ -26,7 +26,6 @@ const LINKS = [
 ];
 
 export default function ToolsPage() {
-  const [insights, setInsights] = useState<Record<string, unknown> | null>(null);
   const [flushResult, setFlushResult] = useState('');
   const [health, setHealth] = useState('');
   const [pin, setPin] = useState('');
@@ -34,7 +33,6 @@ export default function ToolsPage() {
   const [enqueueMsg, setEnqueueMsg] = useState('');
 
   useEffect(() => {
-    api.get('/analytics/insights').then((res) => setInsights(res.data.body)).catch(console.error);
     api
       .get('/app/boot-meta')
       .then((res) => setHealth(`API OK · ${res.data.body?.app_name || 'Forkiva'}`))
@@ -56,9 +54,6 @@ export default function ToolsPage() {
     setPinMsg('Manager PIN updated (use for void/refund approval)');
     setPin('');
   }
-
-  const fraud = (insights?.fraud_signal || {}) as { level?: string; void_rate_pct?: number; score?: number };
-  const top = (insights?.top_sellers || []) as Array<{ name: string; qty: number }>;
 
   return (
     <div className="space-y-4">
@@ -123,18 +118,11 @@ export default function ToolsPage() {
         </Card>
 
         <Card className="space-y-2 p-4">
-          <h2 className="font-semibold">Fraud / demand insights</h2>
-          <p className="text-sm text-muted">
-            Level: <strong className="text-foreground">{fraud.level || 'n/a'}</strong> · void rate {fraud.void_rate_pct ?? 0}% · score{' '}
-            {fraud.score ?? 0}
-          </p>
-          <ul className="text-sm">
-            {top.slice(0, 5).map((t) => (
-              <li key={t.name}>
-                {t.name}: {t.qty}
-              </li>
-            ))}
-          </ul>
+          <h2 className="font-semibold">Analytics & Insights</h2>
+          <p className="text-sm text-muted">Forecasts, waste risk, and fraud signals moved to the dedicated analytics page.</p>
+          <Link href="/admin/analytics" className="text-sm font-semibold text-brand hover:underline">
+            Open Analytics →
+          </Link>
         </Card>
       </div>
     </div>

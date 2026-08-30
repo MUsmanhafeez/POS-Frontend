@@ -18,7 +18,14 @@ export default function LoginPage() {
     setError('');
     try {
       await login(identifier, password);
-      router.push('/admin');
+      const user = useAuthStore.getState().user;
+      const role = user?.role?.name || '';
+      const posRoles = ['cashier', 'waiter', 'kitchen'];
+      if (posRoles.includes(role)) {
+        router.push(role === 'kitchen' ? '/admin/kitchen' : '/admin/pos');
+      } else {
+        router.push('/admin');
+      }
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||

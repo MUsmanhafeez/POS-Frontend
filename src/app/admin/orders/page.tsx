@@ -20,7 +20,32 @@ type OrderRow = {
   total?: number;
   created_at?: string;
   createdAt?: string;
+  order_source?: string;
+  orderSource?: string;
+  external_platform?: string;
+  externalPlatform?: string;
 };
+
+function aggregatorBadge(row: OrderRow) {
+  const source = row.order_source || row.orderSource;
+  const platform = row.external_platform || row.externalPlatform;
+  if (!source && !platform) return null;
+  const label = platform || source;
+  if (!label) return null;
+  const isAgg =
+    platform ||
+    source === 'aggregator' ||
+    source === 'food_panda' ||
+    source === 'golootlo' ||
+    source === 'qr' ||
+    source === 'kiosk';
+  if (!isAgg) return null;
+  return (
+    <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-800 dark:bg-violet-950 dark:text-violet-200">
+      {String(label).replace(/_/g, ' ')}
+    </span>
+  );
+}
 
 export default function OrdersPage() {
   const [items, setItems] = useState<OrderRow[]>([]);
@@ -68,7 +93,16 @@ export default function OrdersPage() {
           })}
           columns={[
             { key: 'customer', header: 'Customer', render: (r) => r.customer || 'Walk-in' },
-            { key: 'ref', header: 'Reference No', render: (r) => <span className="font-medium">{r.reference_no || r.referenceNo || '—'}</span> },
+            {
+              key: 'ref',
+              header: 'Reference No',
+              render: (r) => (
+                <span className="flex items-center gap-2 font-medium">
+                  {r.reference_no || r.referenceNo || '—'}
+                  {aggregatorBadge(r)}
+                </span>
+              ),
+            },
             { key: 'branch', header: 'Branch', render: (r) => labelOf(r.branch) || '—' },
             { key: 'type', header: 'Type', render: (r) => r.type || '—' },
             { key: 'status', header: 'Status', render: (r) => <StatusBadge value={r.status} /> },

@@ -14,11 +14,22 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import api from '@/lib/api';
+import ManagerPinModal from '@/components/admin/ManagerPinModal';
+import SplitBillModal from '@/components/pos/SplitBillModal';
 import { labelOf } from '@/lib/ui';
 
 type Drawer = 'table-viewer' | 'orders' | 'sales-return' | 'cash-movement' | null;
 
-type TableRow = { id: string; name: unknown; status?: string; capacity?: number; floor?: unknown; zone?: unknown };
+type TableRow = {
+  id: string;
+  name: unknown;
+  status?: string;
+  capacity?: number;
+  floor?: unknown;
+  zone?: unknown;
+  floor_id?: string;
+  zone_id?: string;
+};
 type OrderRow = {
   id: string;
   referenceNo?: string;
@@ -26,6 +37,12 @@ type OrderRow = {
   status?: string;
   total?: number;
   type?: string;
+  orderSource?: string;
+  order_source?: string;
+  externalPlatform?: string;
+  external_platform?: string;
+  externalId?: string;
+  external_id?: string;
   createdAt?: string;
   created_at?: string;
   customer?: string;
@@ -34,6 +51,14 @@ type SalesReturnRow = OrderRow & { partyName?: string; remarks?: string; amount?
 
 const CASH_OUT_TYPES = ['Pay-Out', 'Tip-Out', 'Refund', 'Cash Drop', 'Correction'] as const;
 const CASH_IN_TYPES = ['Pay-In', 'Tip-In', 'Float', 'Correction'] as const;
+
+const TABLE_STATUS_CLASS: Record<string, string> = {
+  available: 'border-emerald-300 bg-emerald-50',
+  free: 'border-emerald-300 bg-emerald-50',
+  occupied: 'border-orange-300 bg-orange-50',
+  reserved: 'border-sky-300 bg-sky-50',
+  dirty: 'border-rose-300 bg-rose-50',
+};
 
 export type PosModulesProps = {
   active: Drawer;
@@ -86,9 +111,25 @@ function DrawerShell({
 
 export function PosModules({ active, onClose, sessionId, branchId, currency = 'PKR', onSelectTable }: PosModulesProps) {
   const [tables, setTables] = useState<TableRow[]>([]);
+  const [floors, setFloors] = useState<Array<{ id: string; name: unknown }>>([]);
+  const [zones, setZones] = useState<Array<{ id: string; name: unknown; floor_id?: string }>>([]);
+  const [reservations, setReservations] = useState<Array<Record<string, unknown>>>([]);
+  const [floorFilter, setFloorFilter] = useState('');
+  const [zoneFilter, setZoneFilter] = useState('');
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [heldOrders, setHeldOrders] = useState<OrderRow[]>([]);
+  const [ordersTab, setOrdersTab] = useState<'active' | 'held'>('active');
+  const [orderSourceFilter, setOrderSourceFilter] = useState<'all' | 'in_house' | 'aggregator'>('all');
   const [returnRows, setReturnRows] = useState<SalesReturnRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<{
+    type: 'void' | 'refund' | 'cash';
+    orderId?: string;
+    amount?: number;
+  } | null>(null);
+  const [splitOrder, setSplitOrder] = useState<OrderRow | null>(null);
+  const [cashApprover, setCashApprover] = useState<{ id: string; name: string } | null>(null);
 
   // Sales return filters
   const [fromDate, setFromDate] = useState(() => {
@@ -118,12 +159,32 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
       tasks.push(
         api.get('/tables', { params: branchId ? { branch_id: branchId } : {} }).then((res) => {
           setTables(res.data.body || []);
+        }),
+        api.get('/floors', { params: branchId ? { branch_id: branchId } : {} }).then((res) => {
+          setFloors(res.data.body || []);
+        }),
+        api.get('/zones', { params: branchId ? { branch_id: branchId } : {} }).then((res) => {
+          setZones(res.data.body || []);
+        }),
+        api.get('/reservations').then((res) => {
+          setReservations(res.data.body || []);
         })
       );
     }
-    if (active === 'orders' || active === 'sales-return') {
+    if (active === 'orders') {
+      const sourceParam = orderSourceFilter === 'all' ? {} : { source: orderSourceFilter };
       tasks.push(
-        api.get('/orders', { params: { status: active === 'orders' ? undefined : undefined } }).then((res) => {
+        api.get('/orders', { params: sourceParam }).then((res) => {
+          setOrders((res.data.body || []) as OrderRow[]);
+        }),
+        api.get('/orders', { params: { held: 1, ...sourceParam } }).then((res) => {
+          setHeldOrders((res.data.body || []) as OrderRow[]);
+        })
+      );
+    }
+    if (active === 'sales-return') {
+      tasks.push(
+        api.get('/orders').then((res) => {
           const rows = (res.data.body || []) as OrderRow[];
           setOrders(rows);
           if (active === 'sales-return') {
@@ -145,7 +206,7 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
     Promise.all(tasks)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [active, branchId, fromDate, toDate, serviceType, partyDesc]);
+  }, [active, branchId, fromDate, toDate, serviceType, partyDesc, orderSourceFilter]);
 
   async function submitCash(e: FormEvent) {
     e.preventDefault();
@@ -158,17 +219,46 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
       setCashMsg('Enter a valid amount');
       return;
     }
+    if (cashDir === 'out' && amount > 500 && !cashApprover) {
+      setPendingAction({ type: 'cash' });
+      setPinOpen(true);
+      return;
+    }
+    await postCashMovement(amount);
+  }
+
+  async function postCashMovement(amount: number, approver?: { id: string; name: string }, pin?: string) {
     const type = `${cashDir === 'in' ? 'cash-in' : 'cash-out'}:${cashType.toLowerCase().replace(/\s+/g, '-')}`;
     await api.post(`/pos/sessions/${sessionId}/cash-movements`, {
       type,
       amount,
       reason: [cashRef, cashNotes].filter(Boolean).join(' · ') || cashType,
+      approved_by: approver?.id,
+      manager_pin: pin,
     });
     setCashMsg(`${cashType} recorded (${currency} ${amount.toFixed(currency === 'JOD' ? 3 : 2)})`);
     setCashAmount('');
     setCashRef('');
     setCashNotes('');
+    setCashApprover(null);
   }
+
+  async function recallHeld(orderId: string) {
+    await api.post(`/orders/${orderId}/recall`);
+    setCashMsg('Order recalled to cart');
+    const [active, held] = await Promise.all([
+      api.get('/orders'),
+      api.get('/orders', { params: { held: 1 } }),
+    ]);
+    setOrders(active.data.body || []);
+    setHeldOrders(held.data.body || []);
+  }
+
+  const filteredTables = tables.filter((t) => {
+    if (floorFilter && t.floor_id !== floorFilter) return false;
+    if (zoneFilter && t.zone_id !== zoneFilter) return false;
+    return true;
+  });
 
   function filterReturns() {
     setReturnRows(
@@ -201,8 +291,33 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {tables.map((t) => (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <select className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold" value={floorFilter} onChange={(e) => setFloorFilter(e.target.value)}>
+                <option value="">All floors</option>
+                {floors.map((f) => (
+                  <option key={f.id} value={f.id}>{labelOf(f.name)}</option>
+                ))}
+              </select>
+              <select className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold" value={zoneFilter} onChange={(e) => setZoneFilter(e.target.value)}>
+                <option value="">All zones</option>
+                {zones.filter((z) => !floorFilter || z.floor_id === floorFilter).map((z) => (
+                  <option key={z.id} value={z.id}>{labelOf(z.name)}</option>
+                ))}
+              </select>
+            </div>
+            {reservations.length > 0 && (
+              <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs">
+                <div className="font-bold text-sky-900">Upcoming reservations</div>
+                <ul className="mt-2 space-y-1 text-sky-800">
+                  {reservations.slice(0, 5).map((r, i) => (
+                    <li key={i}>{String(r.customer_name || 'Guest')} · {String(r.reserved_at || '').slice(0, 16)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {filteredTables.map((t) => (
               <button
                 key={t.id}
                 type="button"
@@ -210,28 +325,76 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
                   onSelectTable?.(t.id, labelOf(t.name));
                   onClose();
                 }}
-                className="rounded-xl border border-teal-200 bg-teal-50 p-3 text-left transition hover:border-teal-400 hover:bg-teal-100"
+                className={clsx(
+                  'rounded-xl border p-3 text-left transition hover:shadow-sm',
+                  TABLE_STATUS_CLASS[String(t.status || 'available')] || 'border-teal-200 bg-teal-50'
+                )}
               >
                 <div className="font-bold text-slate-900">{labelOf(t.name)}</div>
                 <div className="mt-1 text-xs capitalize text-slate-600">{t.status || 'available'}</div>
                 <div className="text-xs text-slate-500">Seats {t.capacity ?? 4}</div>
               </button>
             ))}
+            </div>
           </div>
         )}
       </DrawerShell>
 
       <DrawerShell open={active === 'orders'} title="Order Management" icon={<ClipboardList className="h-5 w-5" />} onClose={onClose} wide>
+        <div className="mb-3 flex flex-wrap gap-2">
+          {(['all', 'in_house', 'aggregator'] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              className={clsx(
+                'rounded-lg px-3 py-1.5 text-xs font-bold',
+                orderSourceFilter === f ? 'bg-teal-600 text-white' : 'border border-slate-200 text-slate-600'
+              )}
+              onClick={() => setOrderSourceFilter(f)}
+            >
+              {f === 'all' ? 'All' : f === 'in_house' ? 'In-house' : 'Aggregator'}
+            </button>
+          ))}
+        </div>
         <div className="mb-4 flex gap-2 border-b border-slate-200">
-          <button type="button" className="border-b-2 border-teal-600 px-3 py-2 text-sm font-bold text-teal-800">
+          <button
+            type="button"
+            className={clsx('px-3 py-2 text-sm font-bold', ordersTab === 'active' ? 'border-b-2 border-teal-600 text-teal-800' : 'text-slate-500')}
+            onClick={() => setOrdersTab('active')}
+          >
             Active Orders
           </button>
-          <button type="button" className="px-3 py-2 text-sm font-medium text-slate-500">
-            Upcoming Orders
+          <button
+            type="button"
+            className={clsx('px-3 py-2 text-sm font-bold', ordersTab === 'held' ? 'border-b-2 border-teal-600 text-teal-800' : 'text-slate-500')}
+            onClick={() => setOrdersTab('held')}
+          >
+            Held ({heldOrders.length})
           </button>
         </div>
         {loading ? (
           <p className="text-sm text-slate-600">Loading orders…</p>
+        ) : ordersTab === 'held' ? (
+          heldOrders.length === 0 ? (
+            <p className="text-sm text-slate-600">No held orders.</p>
+          ) : (
+            <ul className="space-y-2">
+              {heldOrders.map((o) => (
+                <li key={o.id} className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
+                  <div>
+                    <div className="font-bold">{o.referenceNo || o.reference_no || o.id.slice(0, 8)}</div>
+                    <div className="text-xs capitalize text-slate-500">held</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-teal-800">{currency} {Number(o.total || 0).toFixed(2)}</span>
+                    <button type="button" className="rounded-lg bg-teal-600 px-2 py-1 text-xs font-bold text-white" onClick={() => recallHeld(o.id)}>
+                      Recall
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
         ) : orders.filter((o) => !['completed', 'cancelled', 'voided'].includes(String(o.status))).length === 0 ? (
           <div className="grid place-items-center py-12 text-center">
             <ClipboardList className="mb-3 h-12 w-12 text-teal-400" />
@@ -250,10 +413,21 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
                     <div className="font-bold">{o.referenceNo || o.reference_no || o.id.slice(0, 8)}</div>
                     <div className="text-xs capitalize text-slate-500">
                       {o.type} · {o.status}
+                      {(o.orderSource || o.order_source || o.externalPlatform || o.external_platform) ? (
+                        <span className="ml-1 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-800">
+                          {o.externalPlatform || o.external_platform || o.orderSource || o.order_source}
+                          {o.externalId || o.external_id ? ` #${o.externalId || o.external_id}` : ''}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
-                  <div className="font-bold text-teal-800">
-                    {currency} {Number(o.total || 0).toFixed(currency === 'JOD' ? 3 : 2)}
+                  <div className="flex items-center gap-2">
+                    <div className="font-bold text-teal-800">
+                      {currency} {Number(o.total || 0).toFixed(currency === 'JOD' ? 3 : 2)}
+                    </div>
+                    <button type="button" className="text-xs font-bold text-violet-700" onClick={() => setSplitOrder(o)}>
+                      Split
+                    </button>
                   </div>
                 </li>
               ))}
@@ -309,6 +483,7 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
                 <th className="px-3 py-2">Party</th>
                 <th className="px-3 py-2">Amount</th>
                 <th className="px-3 py-2">Type</th>
+                <th className="px-3 py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -319,11 +494,35 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
                   <td className="px-3 py-2">{r.customer || 'Walk-in'}</td>
                   <td className="px-3 py-2">{Number(r.total || 0).toFixed(currency === 'JOD' ? 3 : 2)}</td>
                   <td className="px-3 py-2 capitalize">{r.type || '—'}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        className="rounded bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700"
+                        onClick={() => {
+                          setPendingAction({ type: 'void', orderId: r.id });
+                          setPinOpen(true);
+                        }}
+                      >
+                        Void
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800"
+                        onClick={() => {
+                          setPendingAction({ type: 'refund', orderId: r.id, amount: Number(r.total || 0) });
+                          setPinOpen(true);
+                        }}
+                      >
+                        Refund
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {!returnRows.length && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-slate-500">
+                  <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
                     No records found for the selected filters.
                   </td>
                 </tr>
@@ -402,6 +601,73 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
           </div>
         </form>
       </DrawerShell>
+
+      <ManagerPinModal
+        open={pinOpen}
+        onClose={() => {
+          setPinOpen(false);
+          setPendingAction(null);
+        }}
+        onVerified={async (approver, pin) => {
+          if (!pendingAction) return;
+          if (pendingAction.type === 'void' && pendingAction.orderId) {
+            await api.post(`/orders/${pendingAction.orderId}/void`, { reason: 'POS void', approved_by: approver.id, manager_pin: pin });
+            const res = await api.get('/orders');
+            const rows = (res.data.body || []) as OrderRow[];
+            setOrders(rows);
+            setReturnRows(
+              rows.filter((o) => {
+                const created = String(o.createdAt || o.created_at || '').slice(0, 10);
+                if (fromDate && created < fromDate) return false;
+                if (toDate && created > toDate) return false;
+                if (serviceType !== 'all' && o.type !== serviceType) return false;
+                if (partyDesc && !String(o.customer || o.referenceNo || o.reference_no || '').toLowerCase().includes(partyDesc.toLowerCase()))
+                  return false;
+                return o.status !== 'voided';
+              })
+            );
+          } else if (pendingAction.type === 'refund' && pendingAction.orderId) {
+            await api.post(`/orders/${pendingAction.orderId}/refund`, {
+              reason: 'POS refund',
+              amount: pendingAction.amount || 0,
+              approved_by: approver.id,
+              manager_pin: pin,
+            });
+            const res = await api.get('/orders');
+            const rows = (res.data.body || []) as OrderRow[];
+            setOrders(rows);
+            setReturnRows(
+              rows.filter((o) => {
+                const created = String(o.createdAt || o.created_at || '').slice(0, 10);
+                if (fromDate && created < fromDate) return false;
+                if (toDate && created > toDate) return false;
+                if (serviceType !== 'all' && o.type !== serviceType) return false;
+                if (partyDesc && !String(o.customer || o.referenceNo || o.reference_no || '').toLowerCase().includes(partyDesc.toLowerCase()))
+                  return false;
+                return o.status !== 'voided';
+              })
+            );
+          } else if (pendingAction.type === 'cash') {
+            const amount = Number(cashAmount);
+            await postCashMovement(amount, approver, pin);
+          }
+          setPendingAction(null);
+        }}
+      />
+      {splitOrder && (
+        <SplitBillModal
+          open
+          orderId={splitOrder.id}
+          orderRef={splitOrder.referenceNo || splitOrder.reference_no}
+          total={Number(splitOrder.total || 0)}
+          currency={currency}
+          onClose={() => setSplitOrder(null)}
+          onDone={() => {
+            api.get('/orders').then((res) => setOrders(res.data.body || []));
+            setSplitOrder(null);
+          }}
+        />
+      )}
     </>
   );
 }
