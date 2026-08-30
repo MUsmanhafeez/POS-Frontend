@@ -11,14 +11,17 @@ import {
   Table2,
   Wallet,
   X,
+  CloudUpload,
 } from 'lucide-react';
 import clsx from 'clsx';
 import api from '@/lib/api';
+import { posOfflineClient } from '@/lib/offline/posOfflineClient';
+import { drainSyncQueue } from '@/lib/offline/syncEngine';
 import ManagerPinModal from '@/components/admin/ManagerPinModal';
 import SplitBillModal from '@/components/pos/SplitBillModal';
 import { labelOf } from '@/lib/ui';
 
-type Drawer = 'table-viewer' | 'orders' | 'sales-return' | 'cash-movement' | null;
+type Drawer = 'table-viewer' | 'orders' | 'sales-return' | 'cash-movement' | 'pending-sync' | null;
 
 type TableRow = {
   id: string;
@@ -129,6 +132,10 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
     amount?: number;
   } | null>(null);
   const [splitOrder, setSplitOrder] = useState<OrderRow | null>(null);
+  const [pendingSync, setPendingSync] = useState<{
+    queue: Array<{ id: string; type: string; status: string; createdAt?: string; lastError?: string }>;
+    orders: Array<{ id: string; referenceNo: string; total: number; status: string }>;
+  }>({ queue: [], orders: [] });
   const [cashApprover, setCashApprover] = useState<{ id: string; name: string } | null>(null);
 
   // Sales return filters
@@ -199,6 +206,27 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
               })
             );
           }
+        })
+      );
+    }
+    if (active === 'pending-sync') {
+      tasks.push(
+        posOfflineClient.listPendingSync().then((data) => {
+          setPendingSync({
+            queue: (data.queue || []).map((q) => ({
+              id: q.id,
+              type: q.type,
+              status: q.status,
+              createdAt: q.createdAt,
+              lastError: q.lastError,
+            })),
+            orders: (data.orders || []).map((o) => ({
+              id: o.id,
+              referenceNo: o.referenceNo,
+              total: o.total,
+              status: o.status,
+            })),
+          });
         })
       );
     }
@@ -602,6 +630,63 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
         </form>
       </DrawerShell>
 
+      <DrawerShell open={active === 'pending-sync'} title="Pending sync" icon={<CloudUpload className="h-5 w-5" />} onClose={onClose}>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">Offline sales and actions waiting to upload to the server.</p>
+          <button
+            type="button"
+            className="rounded-xl bg-teal-600 px-3 py-2 text-sm font-bold text-white"
+            onClick={() =>
+              drainSyncQueue(true).then(() =>
+                posOfflineClient.listPendingSync().then((data) =>
+                  setPendingSync({
+                    queue: (data.queue || []).map((q) => ({
+                      id: q.id,
+                      type: q.type,
+                      status: q.status,
+                      createdAt: q.createdAt,
+                      lastError: q.lastError,
+                    })),
+                    orders: (data.orders || []).map((o) => ({
+                      id: o.id,
+                      referenceNo: o.referenceNo,
+                      total: o.total,
+                      status: o.status,
+                    })),
+                  })
+                )
+              )
+            }
+          >
+            Sync now
+          </button>
+          <div>
+            <h4 className="text-xs font-bold uppercase text-slate-500">Queued orders</h4>
+            <ul className="mt-2 space-y-2">
+              {pendingSync.orders.map((o) => (
+                <li key={o.id} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  <span className="font-semibold">{o.referenceNo}</span>
+                  <span className="text-slate-500"> · {o.total.toFixed(2)} {currency}</span>
+                </li>
+              ))}
+              {!pendingSync.orders.length ? <li className="text-sm text-slate-500">No pending orders</li> : null}
+            </ul>
+          </div>
+          <div>
+            <h4 className="text-xs font-bold uppercase text-slate-500">Outbox events</h4>
+            <ul className="mt-2 space-y-2">
+              {pendingSync.queue.map((q) => (
+                <li key={q.id} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  <div className="font-semibold">{q.type}</div>
+                  <div className="text-xs text-slate-500">{q.status}{q.lastError ? ` · ${q.lastError}` : ''}</div>
+                </li>
+              ))}
+              {!pendingSync.queue.length ? <li className="text-sm text-slate-500">Queue empty</li> : null}
+            </ul>
+          </div>
+        </div>
+      </DrawerShell>
+
       <ManagerPinModal
         open={pinOpen}
         onClose={() => {
@@ -672,13 +757,14 @@ export function PosModules({ active, onClose, sessionId, branchId, currency = 'P
   );
 }
 
-export type PosModuleId = 'table-viewer' | 'orders' | 'sales-return' | 'cash-movement';
+export type PosModuleId = 'table-viewer' | 'orders' | 'sales-return' | 'cash-movement' | 'pending-sync';
 
 export const POS_MODULE_ITEMS: Array<{ id: PosModuleId; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'table-viewer', label: 'Table Viewer', icon: Table2 },
   { id: 'orders', label: 'Orders', icon: ShoppingBag },
   { id: 'sales-return', label: 'Sales Return', icon: RotateCcw },
   { id: 'cash-movement', label: 'Cash Movement', icon: Banknote },
+  { id: 'pending-sync', label: 'Pending sync', icon: CloudUpload },
 ];
 
 export function PosHomeDeliveryModal({

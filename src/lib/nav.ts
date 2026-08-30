@@ -403,7 +403,7 @@ export const ACTIVITIES_TABS = [
 
 export const SETTINGS_NAV = [
   { href: '/admin/settings/general', label: 'General', icon: Settings },
-  { href: '/admin/settings/application', label: 'Application', icon: MonitorSmartphone },
+  { href: '/admin/settings/application', label: 'ERP Name', icon: MonitorSmartphone },
   { href: '/admin/settings/logo', label: 'Logo', icon: ImageIcon },
   { href: '/admin/settings/appearance', label: 'Appearance', icon: Grid2x2 },
   { href: '/admin/settings/pwa', label: 'PWA', icon: MonitorSmartphone },

@@ -7,6 +7,7 @@ import { Field } from '@/components/ui';
 import { btnPrimary, btnSecondary, fieldClass } from '@/lib/ui';
 import { useThemeStore } from '@/stores/theme';
 import { useLocaleStore } from '@/stores/locale';
+import { useAppSettingsStore } from '@/stores/appSettings';
 import type { AppearanceColors } from '@/lib/theme';
 
 type Props = {
@@ -88,6 +89,9 @@ export default function SettingsFormShell({
         if (loc === 'en' || loc === 'ar') {
           useLocaleStore.getState().setLocale(loc);
         }
+      }
+      if (section === 'application' && merged.app_name) {
+        useAppSettingsStore.getState().setAppName(String(merged.app_name));
       }
 
       setMessageType('success');

@@ -6,6 +6,7 @@ import { ArrowUpRight } from 'lucide-react';
 import api from '@/lib/api';
 import { Card, PageHeader } from '@/components/ui';
 import { btnSecondary, labelOf } from '@/lib/ui';
+import PwaInstallHint from '@/components/pos/PwaInstallHint';
 
 export default function PosIndexPage() {
   const [registers, setRegisters] = useState<Array<Record<string, unknown>>>([]);
@@ -25,6 +26,7 @@ export default function PosIndexPage() {
           </Link>
         }
       />
+      <PwaInstallHint />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {registers.map((r) => (
           <Link key={String(r.id)} href={`/admin/pos/${r.id}`}>

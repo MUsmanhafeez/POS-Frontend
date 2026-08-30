@@ -3,10 +3,12 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth';
+import { appInitial, useAppSettingsStore } from '@/stores/appSettings';
 
 export default function LoginPage() {
   const router = useRouter();
   const login = useAuthStore((s) => s.login);
+  const appName = useAppSettingsStore((s) => s.appName);
   const [identifier, setIdentifier] = useState('admin@forkiva.app');
   const [password, setPassword] = useState('12345678');
   const [error, setError] = useState('');
@@ -41,10 +43,10 @@ export default function LoginPage() {
       <form onSubmit={onSubmit} className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 shadow-xl">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand to-accent text-lg font-bold text-white shadow-sm">
-            F
+            {appInitial(appName)}
           </div>
-          <h1 className="text-2xl font-bold tracking-[0.14em] text-foreground">FORKIVA</h1>
-          <p className="mt-2 text-sm font-medium text-muted">Welcome to Forkiva Restaurant POS</p>
+          <h1 className="text-2xl font-bold tracking-[0.14em] text-foreground">{appName.toUpperCase()}</h1>
+          <p className="mt-2 text-sm font-medium text-muted">Welcome to {appName} Restaurant POS</p>
         </div>
         {error && (
           <div className="mb-4 rounded-xl bg-danger-soft px-3 py-2 text-sm font-medium text-danger">{error}</div>

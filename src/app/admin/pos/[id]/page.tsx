@@ -28,7 +28,8 @@ import {
   ChefHat,
 } from 'lucide-react';
 import clsx from 'clsx';
-import api from '@/lib/api';
+import { posOfflineClient } from '@/lib/offline/posOfflineClient';
+import OfflineBanner from '@/components/pos/OfflineBanner';
 import { useAuthStore } from '@/stores/auth';
 import { labelOf } from '@/lib/ui';
 import {
@@ -263,28 +264,25 @@ export default function PosViewerPage() {
   const customerEmail = selectedCustomer?.email || null;
 
   async function load() {
-    const { data } = await api.get(`/pos/viewer/${registerId}`);
-    setBoot(data.body);
-    setSessionId(data.body.session?.id || null);
-    if (data.body.menus?.[0]?.id && menuId === 'all') {
-      // keep "all" as default so products show
-    }
+    const body = await posOfflineClient.loadViewer(registerId);
+    setBoot(body);
+    setSessionId((body.session as { id?: string })?.id || null);
   }
 
   useEffect(() => {
     load().catch(console.error);
     setDark(localStorage.getItem('forkiva-theme') === 'dark');
-    Promise.all([api.get('/customers'), api.get('/users')])
-      .then(([c, u]) => {
+    posOfflineClient.loadCustomersAndWaiters()
+      .then(({ customers: cList, waiters: wList }) => {
         setCustomers(
-          (c.data.body || []).map((x: { id: string; name: string; email?: string; loyalty_points?: number; loyaltyPoints?: number }) => ({
+          (cList || []).map((x: { id: string; name: string; email?: string; loyalty_points?: number; loyaltyPoints?: number }) => ({
             id: x.id,
             name: x.name,
             email: x.email,
             loyalty_points: Number(x.loyalty_points ?? x.loyaltyPoints ?? 0),
           }))
         );
-        setWaiters((u.data.body || []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
+        setWaiters((wList || []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
       })
       .catch(() => undefined);
   }, [registerId]);
@@ -319,11 +317,8 @@ export default function PosViewerPage() {
     setBusy(true);
     try {
       const float = Number(openingFloat || 0);
-      const { data } = await api.post('/pos/sessions/open', {
-        pos_register_id: registerId,
-        opening_float: float,
-      });
-      setSessionId(data.body.id);
+      const body = await posOfflineClient.openSession(registerId, float);
+      setSessionId(body.id as string);
       setMessage('Session opened');
       setFloatOpen(false);
       setOpeningFloat('');
@@ -338,8 +333,8 @@ export default function PosViewerPage() {
   async function runXReport() {
     if (!sessionId) return;
     try {
-      const { data } = await api.get('/reports/xz', { params: { type: 'X', session_id: sessionId, register_id: registerId } });
-      const sales = data.body.sales as { sales_total?: number; orders_count?: number };
+      const body = await posOfflineClient.getXReport(registerId, sessionId);
+      const sales = body.sales as { sales_total?: number; orders_count?: number };
       setMessage(`X Report: ${sales?.orders_count || 0} orders · ${money(Number(sales?.sales_total || 0), currency)}`);
     } catch {
       setMessage('Could not load X report');
@@ -348,20 +343,18 @@ export default function PosViewerPage() {
 
   async function ensureCart() {
     if (cartUuid) return cartUuid;
-    const { data } = await api.post('/cart', {
-      branch_id: register?.branchId,
-      pos_register_id: registerId,
-      pos_session_id: sessionId,
-      order_type: orderType.value,
-      guest_count: guestCount,
+    const uuid = await posOfflineClient.ensureCart(registerId, sessionId!, {
+      branchId: String(register?.branchId ?? boot?.branchId ?? boot?.branch_id ?? ''),
+      orderType: orderType.value,
+      guestCount: guestCount,
     });
-    setCartUuid(data.body.uuid);
-    return data.body.uuid as string;
+    setCartUuid(uuid);
+    return uuid;
   }
 
   async function syncCartMeta(uuid: string, patch: Record<string, unknown>) {
-    const { data } = await api.patch(`/cart/${uuid}`, patch);
-    setCartTotals(mapCartTotals(data.body as Record<string, unknown>));
+    const body = await posOfflineClient.patchCart(uuid, patch);
+    setCartTotals(mapCartTotals(body));
   }
 
   function applyCartResponse(body: Record<string, unknown>) {
@@ -396,16 +389,17 @@ export default function PosViewerPage() {
     try {
       const uuid = await ensureCart();
       const price = Number(p.effectivePrice ?? p.specialPrice ?? p.price ?? 0);
-      const { data } = await api.post(`/cart/${uuid}/items`, {
-        product_id: p.id,
+      const body = await posOfflineClient.addCartItem(uuid, {
+        product_id: String(p.id),
         qty: 1,
         unit_price: price,
         options,
         notes,
         course: course || undefined,
-        force_new: options.length > 0 || notes || course ? true : undefined,
+        name: p.name,
+        tax_class: (p.taxClass as string) || (p.tax_class as string) || null,
       });
-      applyCartResponse(data.body as Record<string, unknown>);
+      applyCartResponse(body);
       setOrderPanelOpen(true);
     } catch (err: unknown) {
       setMessage((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not add item');
@@ -443,8 +437,8 @@ export default function PosViewerPage() {
 
   async function removeItem(index: number) {
     if (!cartUuid) return;
-    const { data } = await api.delete(`/cart/${cartUuid}/items/${index}`);
-    applyCartResponse(data.body as Record<string, unknown>);
+    const body = await posOfflineClient.removeCartItem(cartUuid, index);
+    applyCartResponse(body);
   }
 
   async function clearOrder() {
@@ -492,8 +486,8 @@ export default function PosViewerPage() {
           customer_id: customerId && customerId !== 'walk-in' ? customerId : null,
           waiter_id: waiterId || null,
         });
-        const { data } = await api.post(`/cart/${uuid}/hold`);
-        setMessage(`Held ${data.body.referenceNo || data.body.orderNumber}`);
+        const body = await posOfflineClient.hold(uuid);
+        setMessage(`Held ${body.referenceNo || body.orderNumber}`);
         setCartUuid(null);
         setItems([]);
         setNotes('');
@@ -534,8 +528,8 @@ export default function PosViewerPage() {
         customer_id: customerId && customerId !== 'walk-in' ? customerId : null,
         waiter_id: waiterId || null,
       });
-      const { data } = await api.post(`/cart/${uuid}/checkout`, { mark_paid: false });
-      setMessage(`Sent to kitchen ${data.body.referenceNo}`);
+      const body = await posOfflineClient.checkout(uuid, { markPaid: false });
+      setMessage(`Sent to kitchen ${body.referenceNo}`);
       setCartUuid(null);
       setItems([]);
       setNotes('');
@@ -562,15 +556,15 @@ export default function PosViewerPage() {
         waiter_id: waiterId || null,
         tip_amount: tipAmount,
       });
-      const { data } = await api.post(`/cart/${uuid}/checkout`, {
-        mark_paid: true,
+      const body = await posOfflineClient.checkout(uuid, {
+        markPaid: true,
         payments,
-        tip_amount: tipAmount,
-        send_receipt: sendReceipt,
+        tipAmount,
+        sendReceipt,
       });
-      setMessage(`Paid ${data.body.referenceNo}`);
+      setMessage(`Paid ${body.referenceNo}`);
       if (orderMeta.table_id) {
-        await api.put(`/tables/${orderMeta.table_id}`, { status: 'dirty' }).catch(() => undefined);
+        await posOfflineClient.updateTableStatus(String(orderMeta.table_id), 'dirty');
       }
       setCartUuid(null);
       setItems([]);
@@ -598,34 +592,31 @@ export default function PosViewerPage() {
 
   async function applyLoyalty() {
     if (!cartUuid || !loyaltyPoints) return;
-    const { data } = await api.post(`/cart/${cartUuid}/apply-loyalty`, { points: Number(loyaltyPoints) });
-    applyCartResponse(data.body as Record<string, unknown>);
+    const body = await posOfflineClient.applyLoyalty(cartUuid, Number(loyaltyPoints));
+    applyCartResponse(body);
     setLoyaltyPoints('');
     setMessage('Loyalty points applied');
   }
 
   async function applyPromotion(promotionId: string) {
     if (!cartUuid) return;
-    const { data } = await api.post(`/cart/${cartUuid}/apply-promotion`, { promotion_id: promotionId });
-    applyCartResponse(data.body as Record<string, unknown>);
+    const body = await posOfflineClient.applyPromotion(cartUuid, promotionId);
+    applyCartResponse(body);
     setPromotionsOpen(false);
     setMessage('Promotion applied');
   }
 
   async function openPromotions() {
-    const branchId = register?.branchId ?? boot?.branchId ?? boot?.branch_id;
-    const { data } = await api.get('/promotions', { params: branchId ? { branch_id: branchId } : {} });
-    setPromotions((data.body || []) as Array<{ id: string; name: string; type?: string; value?: number }>);
+    const branchId = String(register?.branchId ?? boot?.branchId ?? boot?.branch_id ?? '');
+    const list = await posOfflineClient.listPromotions(branchId);
+    setPromotions((list || []) as Array<{ id: string; name: string; type?: string; value?: number }>);
     setPromotionsOpen(true);
   }
 
   async function applyDiscountWithPin(pct: number, pin?: string) {
     if (!cartUuid) return;
-    const { data } = await api.post(`/cart/${cartUuid}/apply-discount`, {
-      percent: pct,
-      manager_pin: pin,
-    });
-    applyCartResponse(data.body as Record<string, unknown>);
+    const body = await posOfflineClient.applyDiscount(cartUuid, pct, pin);
+    applyCartResponse(body);
     setDiscountOpen(false);
     setDiscountPct('');
     setDiscountPin('');
@@ -634,8 +625,8 @@ export default function PosViewerPage() {
 
   async function applyCoupon() {
     if (!cartUuid || !couponCode.trim()) return;
-    const { data } = await api.post(`/cart/${cartUuid}/apply-coupon`, { code: couponCode.trim() });
-    applyCartResponse(data.body as Record<string, unknown>);
+    const body = await posOfflineClient.applyCoupon(cartUuid, couponCode.trim());
+    applyCartResponse(body);
     setCouponCode('');
     setMessage('Coupon applied');
   }
@@ -653,7 +644,9 @@ export default function PosViewerPage() {
   const initial = (user?.name || 'F').charAt(0).toUpperCase();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gradient-to-br from-teal-50 via-[#f4f7f6] to-orange-50 text-slate-900">
+    <div className="flex h-screen flex-col overflow-hidden bg-gradient-to-br from-teal-50 via-[#f4f7f6] to-orange-50 text-slate-900">
+      <OfflineBanner />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Mobile overlays */}
       {sidebarOpen && (
         <button type="button" className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />
@@ -1157,6 +1150,7 @@ export default function PosViewerPage() {
             </div>
           </aside>
         </div>
+      </div>
       </div>
 
       <PosModules

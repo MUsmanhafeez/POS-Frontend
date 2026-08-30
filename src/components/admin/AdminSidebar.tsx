@@ -9,6 +9,7 @@ import { ADMIN_NAV, type NavItem } from '@/lib/nav';
 import { useAuthStore } from '@/stores/auth';
 import { useNavPending } from '@/stores/navPending';
 import { useT } from '@/stores/locale';
+import { appInitial, useAppSettingsStore } from '@/stores/appSettings';
 
 /** Exact match only — so /admin/pos does not select when on /admin/pos/opening-closing. */
 function isExactActive(pathname: string, href: string) {
@@ -36,6 +37,7 @@ export default function AdminSidebar({ collapsed, onToggle, onNavigate }: Props)
   const router = useRouter();
   const { can } = useAuthStore();
   const t = useT();
+  const appName = useAppSettingsStore((s) => s.appName);
   const pendingHref = useNavPending((s) => s.href);
   const startPending = useNavPending((s) => s.start);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -70,11 +72,11 @@ export default function AdminSidebar({ collapsed, onToggle, onNavigate }: Props)
     >
       <div className="flex h-[var(--topbar-height)] items-center gap-2 border-b border-border bg-gradient-to-r from-brand-soft via-surface to-accent-soft/40 px-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-teal-600 text-sm font-bold text-white shadow-sm">
-          F
+          {appInitial(appName)}
         </div>
         {!slim && (
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-bold tracking-[0.14em] text-foreground">FORKIVA</div>
+            <div className="truncate text-sm font-bold tracking-[0.14em] text-foreground">{appName.toUpperCase()}</div>
             <div className="truncate text-[11px] font-medium text-brand">{t('Restaurant OS')}</div>
           </div>
         )}
