@@ -106,7 +106,7 @@ export default function InventoryAnalyticsPage() {
               <ul className="space-y-2 text-sm">
                 {topSuppliers.map((s, i) => (
                   <li key={i} className="flex justify-between">
-                    <span>{s.name}</span>
+                    <span>{labelOf(s.name)}</span>
                     <span className="font-medium">JOD {Number(s.amount || 0).toFixed(3)}</span>
                   </li>
                 ))}
@@ -135,7 +135,7 @@ export default function InventoryAnalyticsPage() {
               <ul className="space-y-2 text-sm">
                 {(lowStock as Array<{ name: string; quantity: number; unit: string }>).map((s, i) => (
                   <li key={i} className="flex justify-between">
-                    <span>{s.name}</span>
+                    <span>{labelOf(s.name)}</span>
                     <span>
                       {s.quantity} {s.unit}
                     </span>

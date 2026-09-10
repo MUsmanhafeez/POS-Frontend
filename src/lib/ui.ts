@@ -2,7 +2,18 @@ import clsx from 'clsx';
 
 export function labelOf(v: unknown): string {
   if (v == null) return '';
-  if (typeof v === 'string' || typeof v === 'number') return String(v);
+  if (typeof v === 'string') {
+    try {
+      const o = JSON.parse(v) as Record<string, string>;
+      if (o && typeof o === 'object' && ('en' in o || 'ar' in o)) {
+        return o.en || o.ar || v;
+      }
+    } catch {
+      /* plain string */
+    }
+    return v;
+  }
+  if (typeof v === 'number') return String(v);
   if (typeof v === 'object') {
     const o = v as Record<string, string>;
     return o.en || o.ar || Object.values(o)[0] || '';

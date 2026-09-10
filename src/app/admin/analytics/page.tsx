@@ -1,10 +1,11 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { BarChart3, RefreshCw } from 'lucide-react';
 import api from '@/lib/api';
 import { Card } from '@/components/ui';
-import { btnPrimary, fieldClass } from '@/lib/ui';
+import { btnPrimary, labelOf } from '@/lib/ui';
 
 type Insights = {
   top_sellers?: Array<{ item: string; qty: number; revenue?: number }>;
@@ -15,11 +16,17 @@ type Insights = {
   sales_7d?: { total: number; orders: number };
 };
 
+const PRESET_LINKS = [
+  { href: '/admin/analytics/report-builder', label: 'Report Builder', desc: 'Date, time, branch, YoY filters' },
+  { href: '/admin/analytics/seasonal-readiness', label: 'Seasonal Readiness', desc: 'Eid / occasion stock plan' },
+  { href: '/admin/analytics/report-builder', label: 'Late night sales', desc: 'Use Late Night preset' },
+  { href: '/admin/occasions', label: 'Occasion Calendar', desc: 'Manage events & ETL' },
+];
+
 export default function AnalyticsPage() {
   const [insights, setInsights] = useState<Insights | null>(null);
-  const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState('');
   const [snapshotMsg, setSnapshotMsg] = useState('');
+  const [alerts, setAlerts] = useState<Array<{ name: string; days_until: number }>>([]);
 
   async function load() {
     const { data } = await api.get('/analytics/insights');
@@ -28,13 +35,8 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     load().catch(console.error);
+    api.get('/analytics/occasion-alerts').then((r) => setAlerts(r.data.body?.alerts || []));
   }, []);
-
-  async function ask(e: FormEvent) {
-    e.preventDefault();
-    const { data } = await api.post('/analytics/ask', { question });
-    setAnswer(data.body?.answer || 'No answer');
-  }
 
   async function snapshot() {
     const { data } = await api.post('/analytics/snapshot');
@@ -50,7 +52,7 @@ export default function AnalyticsPage() {
           <BarChart3 className="h-5 w-5 text-plum" />
           <div>
             <h1 className="text-xl font-bold">Analytics & Insights</h1>
-            <p className="text-sm text-muted">SQL-based forecasts, waste risk, and fraud signals (no external AI).</p>
+            <p className="text-sm text-muted">SQL-based intelligence — no external AI API required.</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -61,6 +63,33 @@ export default function AnalyticsPage() {
         </div>
       </div>
       {snapshotMsg ? <p className="text-sm text-emerald-700">{snapshotMsg}</p> : null}
+
+      {alerts.length > 0 && (
+        <Card className="border-warning/40 bg-warning-soft p-4">
+          <p className="font-semibold">Occasion prep alerts</p>
+          <ul className="mt-1 text-sm">
+            {alerts.map((a, i) => (
+              <li key={i}>{labelOf(a.name)} in {a.days_until} days — <Link href="/admin/analytics/seasonal-readiness" className="text-brand underline">view readiness</Link></li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      <Card className="p-4">
+        <h2 className="mb-3 font-bold">Business intelligence reports</h2>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {PRESET_LINKS.map((p) => (
+            <Link
+              key={p.label}
+              href={p.href}
+              className="rounded-xl border border-border p-3 hover:bg-surface-muted transition"
+            >
+              <div className="font-semibold text-brand">{p.label}</div>
+              <div className="text-xs text-muted">{p.desc}</div>
+            </Link>
+          ))}
+        </div>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="p-4">
@@ -79,27 +108,13 @@ export default function AnalyticsPage() {
         </Card>
       </div>
 
-      <Card className="p-4">
-        <h2 className="mb-3 font-bold">Ask ERP</h2>
-        <form onSubmit={ask} className="flex flex-wrap gap-2">
-          <input
-            className={`${fieldClass} min-w-[240px] flex-1`}
-            placeholder="e.g. top sellers, void rate, payment mix"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-          />
-          <button type="submit" className={btnPrimary}>Ask</button>
-        </form>
-        {answer ? <p className="mt-3 rounded-xl bg-surface-muted p-3 text-sm">{answer}</p> : null}
-      </Card>
-
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-4">
           <h2 className="mb-3 font-bold">Demand forecast</h2>
           <ul className="space-y-2 text-sm">
             {(insights?.demand_forecast || []).slice(0, 10).map((r) => (
-              <li key={r.item} className="flex justify-between border-b border-border py-1">
-                <span>{r.item}</span>
+              <li key={labelOf(r.item)} className="flex justify-between border-b border-border py-1">
+                <span>{labelOf(r.item)}</span>
                 <span className="font-semibold">~{r.forecast_qty}</span>
               </li>
             ))}
@@ -109,8 +124,8 @@ export default function AnalyticsPage() {
           <h2 className="mb-3 font-bold">Waste risk</h2>
           <ul className="space-y-2 text-sm">
             {(insights?.waste_risk || []).map((r) => (
-              <li key={r.item} className="flex justify-between border-b border-border py-1">
-                <span>{r.item}</span>
+              <li key={labelOf(r.item)} className="flex justify-between border-b border-border py-1">
+                <span>{labelOf(r.item)}</span>
                 <span className="text-amber-700">{r.risk} · stock {r.inventory_qty ?? '—'}</span>
               </li>
             ))}
@@ -121,8 +136,8 @@ export default function AnalyticsPage() {
           <h2 className="mb-3 font-bold">Top sellers (7d)</h2>
           <ul className="space-y-2 text-sm">
             {(insights?.top_sellers || []).map((r) => (
-              <li key={r.item} className="flex justify-between border-b border-border py-1">
-                <span>{r.item}</span>
+              <li key={labelOf(r.item)} className="flex justify-between border-b border-border py-1">
+                <span>{labelOf(r.item)}</span>
                 <span>{r.qty}</span>
               </li>
             ))}

@@ -99,6 +99,7 @@ export default function AdminDashboardPage() {
   const user = useAuthStore((s) => s.user);
   const [data, setData] = useState<Overview | null>(null);
   const [insights, setInsights] = useState<Insights | null>(null);
+  const [occasionAlerts, setOccasionAlerts] = useState<Array<{ name: string; days_until: number }>>([]);
   const [range, setRange] = useState('weekly');
   const [loading, setLoading] = useState(true);
 
@@ -107,10 +108,12 @@ export default function AdminDashboardPage() {
     Promise.all([
       api.get('/dashboards/overview', { params: { range: range === 'daily' ? 'daily' : range === 'weekly' ? 'weekly' : 'all' } }),
       api.get('/analytics/insights'),
+      api.get('/analytics/occasion-alerts'),
     ])
-      .then(([overview, ins]) => {
+      .then(([overview, ins, alerts]) => {
         setData(overview.data.body);
         setInsights(ins.data.body);
+        setOccasionAlerts(alerts.data.body?.alerts || []);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -220,6 +223,13 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="space-y-6 pb-8">
+      {occasionAlerts.length > 0 && (
+        <div className="rounded-2xl border border-amber-300/50 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+          <strong>Seasonal prep:</strong>{' '}
+          {occasionAlerts.map((a) => `${labelOf(a.name)} in ${a.days_until}d`).join(' · ')} —{' '}
+          <Link href="/admin/analytics/seasonal-readiness" className="font-semibold underline">view readiness report</Link>
+        </div>
+      )}
       {/* Hero */}
       <div className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-teal-600 via-teal-700 to-slate-900 px-5 py-6 text-white shadow-lg sm:px-8 sm:py-8">
         <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
@@ -402,7 +412,7 @@ export default function AdminDashboardPage() {
                   >
                     <AlertTriangle className="h-4 w-4 shrink-0 text-warning mt-0.5" />
                     <div>
-                      <div className="text-sm font-semibold text-foreground">{item.name}</div>
+                      <div className="text-sm font-semibold text-foreground">{labelOf(item.name)}</div>
                       <div className="text-xs text-muted">
                         {item.quantity} {item.unit || ''} left · reorder at {item.reorder_level}
                       </div>

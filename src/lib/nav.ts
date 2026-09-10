@@ -163,6 +163,10 @@ export const POS_BACKOFFICE_NAV: NavSection[] = [
         children: [
           { href: '/admin/reports', label: 'Report catalog' },
           { href: '/admin/analytics', label: 'Analytics & Insights', permission: 'admin.dashboards.index' },
+          { href: '/admin/analytics/report-builder', label: 'Report Builder', permission: 'admin.analytics.reports.index' },
+          { href: '/admin/analytics/seasonal-readiness', label: 'Seasonal Readiness', permission: 'admin.analytics.occasions.index' },
+          { href: '/admin/occasions', label: 'Occasion Calendar', permission: 'admin.analytics.occasions.index' },
+          { href: '/admin/purchase-requisitions', label: 'Purchase Requisitions', permission: 'admin.purchase_requisitions.index' },
         ],
       },
       {
