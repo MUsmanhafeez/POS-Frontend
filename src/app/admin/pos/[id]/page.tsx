@@ -28,7 +28,8 @@ import {
   ChefHat,
 } from 'lucide-react';
 import clsx from 'clsx';
-import api from '@/lib/api';
+import { posOfflineClient } from '@/lib/offline/posOfflineClient';
+import OfflineBanner from '@/components/pos/OfflineBanner';
 import { useAuthStore } from '@/stores/auth';
 import { labelOf } from '@/lib/ui';
 import {
@@ -38,6 +39,10 @@ import {
   PosOrderTypeFields,
   type PosModuleId,
 } from '@/components/pos/PosModules';
+import ModifierModal, { type ProductOption } from '@/components/pos/ModifierModal';
+import PaymentModal, { type PaymentLine } from '@/components/pos/PaymentModal';
+import ComboPickerModal, { type ComboItem } from '@/components/pos/ComboPickerModal';
+import ShiftCloseModal from '@/components/pos/ShiftCloseModal';
 
 type CartItem = {
   productId: string;
@@ -45,6 +50,18 @@ type CartItem = {
   qty: number;
   unitPrice: number;
   lineTotal: number;
+  options?: Array<{ name: string; group: string; price: number }>;
+  notes?: string;
+};
+
+type CartTotals = {
+  subtotal: number;
+  taxTotal: number;
+  serviceCharge: number;
+  discountTotal: number;
+  tipAmount: number;
+  loyaltyPointsRedeemed: number;
+  total: number;
 };
 
 type OrderType = {
@@ -54,6 +71,41 @@ type OrderType = {
   value: string;
   accent: string;
 };
+
+const ORDER_TYPE_ALIASES: Record<string, string> = {
+  dine_in: 'dine_in',
+  takeaway: 'takeaway',
+  delivery: 'home_delivery',
+  pick_up: 'pick_up',
+  home_delivery: 'home_delivery',
+  drive_thru: 'drive_thru',
+  pre_order: 'pre_order',
+  food_panda: 'food_panda',
+  golootlo: 'golootlo',
+};
+
+function parseEnabledOrderTypeIds(settings: Record<string, unknown> | null | undefined): string[] | null {
+  const raw = settings?.order_types_enabled ?? settings?.orderTypesEnabled;
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw === 'string') {
+    try {
+      const p = JSON.parse(raw);
+      return Array.isArray(p) ? p.map(String) : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function filterOrderTypes(settings: Record<string, unknown> | null | undefined): OrderType[] {
+  const enabled = parseEnabledOrderTypeIds(settings);
+  if (!enabled?.length) return ORDER_TYPES;
+  const ids = new Set(enabled.map((e) => ORDER_TYPE_ALIASES[e] || e));
+  const filtered = ORDER_TYPES.filter((t) => ids.has(t.id) || ids.has(t.value));
+  return filtered.length ? filtered : ORDER_TYPES;
+}
 
 const ORDER_TYPES: OrderType[] = [
   { id: 'takeaway', label: 'Takeaway', icon: ShoppingBag, value: 'takeaway', accent: 'from-orange-500 to-amber-500' },
@@ -85,7 +137,7 @@ const CAT_TONES = [
 
 const MODULES = POS_MODULE_ITEMS;
 
-const VAT_RATE = 0.15;
+const MANAGER_ROLES = new Set(['super_admin', 'hq_admin', 'admin', 'branch_manager', 'shift_supervisor', 'regional_manager']);
 
 function money(n: number, currency = 'PKR') {
   const decimals = currency === 'JOD' ? 3 : 2;
@@ -99,13 +151,27 @@ function mapCartItems(raw: Array<Record<string, unknown>> = []): CartItem[] {
     qty: Number(i.qty),
     unitPrice: Number(i.unitPrice),
     lineTotal: Number(i.lineTotal),
+    options: i.options as CartItem['options'],
+    notes: i.notes as string | undefined,
   }));
+}
+
+function mapCartTotals(body: Record<string, unknown>): CartTotals {
+  return {
+    subtotal: Number(body.subtotal ?? 0),
+    taxTotal: Number(body.taxTotal ?? body.tax_total ?? 0),
+    serviceCharge: Number(body.serviceCharge ?? body.service_charge ?? 0),
+    discountTotal: Number(body.discountTotal ?? body.discount_total ?? 0),
+    tipAmount: Number(body.tipAmount ?? body.tip_amount ?? 0),
+    loyaltyPointsRedeemed: Number(body.loyaltyPointsRedeemed ?? body.loyalty_points_redeemed ?? 0),
+    total: Number(body.total ?? 0),
+  };
 }
 
 export default function PosViewerPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { user, logout, can } = useAuthStore();
   const registerId = params.id;
 
   const [boot, setBoot] = useState<Record<string, unknown> | null>(null);
@@ -126,16 +192,53 @@ export default function PosViewerPage() {
   const [activeModule, setActiveModule] = useState<PosModuleId | null>(null);
   const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [orderMeta, setOrderMeta] = useState<Record<string, string>>({});
-  const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
+  const [customers, setCustomers] = useState<Array<{ id: string; name: string; email?: string; loyalty_points?: number }>>([]);
   const [waiters, setWaiters] = useState<Array<{ id: string; name: string }>>([]);
   const [customerId, setCustomerId] = useState('');
   const [waiterId, setWaiterId] = useState('');
+  const [cartTotals, setCartTotals] = useState<CartTotals>({
+    subtotal: 0,
+    taxTotal: 0,
+    serviceCharge: 0,
+    discountTotal: 0,
+    tipAmount: 0,
+    loyaltyPointsRedeemed: 0,
+    total: 0,
+  });
+  const [modifierProduct, setModifierProduct] = useState<Record<string, unknown> | null>(null);
+  const [comboProduct, setComboProduct] = useState<Record<string, unknown> | null>(null);
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [discountOpen, setDiscountOpen] = useState(false);
+  const [discountPct, setDiscountPct] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [floatOpen, setFloatOpen] = useState(false);
+  const [openingFloat, setOpeningFloat] = useState('');
+  const [discountPin, setDiscountPin] = useState('');
+  const [shiftCloseOpen, setShiftCloseOpen] = useState(false);
+  const [promotionsOpen, setPromotionsOpen] = useState(false);
+  const [promotions, setPromotions] = useState<Array<{ id: string; name: string; type?: string; value?: number }>>([]);
+  const [loyaltyPoints, setLoyaltyPoints] = useState('');
+  const [customerLoyaltyBalance, setCustomerLoyaltyBalance] = useState(0);
+  const [couponOpen, setCouponOpen] = useState(false);
 
   const register = boot?.register as Record<string, unknown> | undefined;
+  const branchSettings = (boot?.settings as Record<string, unknown> | null) || null;
+  const enabledOrderTypes = useMemo(() => filterOrderTypes(branchSettings), [branchSettings]);
+  const pricing = boot?.pricing as {
+    currency?: string;
+    taxRate?: number;
+    serviceChargePct?: number;
+    quickPayAmounts?: number[];
+    paymentMethods?: string[];
+  } | undefined;
   const products = (boot?.products as Array<Record<string, unknown>>) || [];
   const categories = (boot?.categories as Array<Record<string, unknown>>) || [];
   const menus = (boot?.menus as Array<Record<string, unknown>>) || [];
-  const currency = 'PKR';
+  const currency = pricing?.currency || 'PKR';
+  const taxLabel = pricing?.taxRate
+    ? `Tax (${Number(pricing.taxRate) > 1 ? pricing.taxRate : Number(pricing.taxRate) * 100}%)`
+    : 'Tax';
+  const showAdminLink = MANAGER_ROLES.has(user?.role?.name || '') || can('admin.settings.index');
 
   const filteredCategories = useMemo(() => {
     if (menuId === 'all') return categories;
@@ -144,33 +247,42 @@ export default function PosViewerPage() {
 
   const filtered = useMemo(() => {
     return products.filter((p) => {
+      if (p.isAvailable === false) return false;
       if (menuId !== 'all' && String(p.menuId) !== menuId) return false;
       if (categoryId === 'all') return true;
       return ((p.categoryIds as string[]) || []).includes(categoryId);
     });
   }, [products, menuId, categoryId]);
 
-  const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
-  const vat = subtotal * VAT_RATE;
-  const total = subtotal + vat;
-  const orderType = ORDER_TYPES.find((t) => t.id === orderTypeId) || ORDER_TYPES[0];
+  const subtotal = cartTotals.subtotal;
+  const vat = cartTotals.taxTotal;
+  const serviceCharge = cartTotals.serviceCharge;
+  const discountTotal = cartTotals.discountTotal;
+  const total = cartTotals.total;
+  const orderType = enabledOrderTypes.find((t) => t.id === orderTypeId) || enabledOrderTypes[0] || ORDER_TYPES[0];
+  const selectedCustomer = customers.find((c) => c.id === customerId);
+  const customerEmail = selectedCustomer?.email || null;
 
   async function load() {
-    const { data } = await api.get(`/pos/viewer/${registerId}`);
-    setBoot(data.body);
-    setSessionId(data.body.session?.id || null);
-    if (data.body.menus?.[0]?.id && menuId === 'all') {
-      // keep "all" as default so products show
-    }
+    const body = await posOfflineClient.loadViewer(registerId);
+    setBoot(body);
+    setSessionId((body.session as { id?: string })?.id || null);
   }
 
   useEffect(() => {
     load().catch(console.error);
     setDark(localStorage.getItem('forkiva-theme') === 'dark');
-    Promise.all([api.get('/customers'), api.get('/users')])
-      .then(([c, u]) => {
-        setCustomers((c.data.body || []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
-        setWaiters((u.data.body || []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
+    posOfflineClient.loadCustomersAndWaiters()
+      .then(({ customers: cList, waiters: wList }) => {
+        setCustomers(
+          (cList || []).map((x: { id: string; name: string; email?: string; loyalty_points?: number; loyaltyPoints?: number }) => ({
+            id: x.id,
+            name: x.name,
+            email: x.email,
+            loyalty_points: Number(x.loyalty_points ?? x.loyaltyPoints ?? 0),
+          }))
+        );
+        setWaiters((wList || []).map((x: { id: string; name: string }) => ({ id: x.id, name: x.name })));
       })
       .catch(() => undefined);
   }, [registerId]);
@@ -198,14 +310,18 @@ export default function PosViewerPage() {
   }
 
   async function openSession() {
+    setFloatOpen(true);
+  }
+
+  async function confirmOpenSession() {
     setBusy(true);
     try {
-      const { data } = await api.post('/pos/sessions/open', {
-        pos_register_id: registerId,
-        opening_float: 0,
-      });
-      setSessionId(data.body.id);
+      const float = Number(openingFloat || 0);
+      const body = await posOfflineClient.openSession(registerId, float);
+      setSessionId(body.id as string);
       setMessage('Session opened');
+      setFloatOpen(false);
+      setOpeningFloat('');
       await load();
     } catch (err: unknown) {
       setMessage((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not open session');
@@ -214,21 +330,36 @@ export default function PosViewerPage() {
     }
   }
 
+  async function runXReport() {
+    if (!sessionId) return;
+    try {
+      const body = await posOfflineClient.getXReport(registerId, sessionId);
+      const sales = body.sales as { sales_total?: number; orders_count?: number };
+      setMessage(`X Report: ${sales?.orders_count || 0} orders · ${money(Number(sales?.sales_total || 0), currency)}`);
+    } catch {
+      setMessage('Could not load X report');
+    }
+  }
+
   async function ensureCart() {
     if (cartUuid) return cartUuid;
-    const { data } = await api.post('/cart', {
-      branch_id: register?.branchId,
-      pos_register_id: registerId,
-      pos_session_id: sessionId,
-      order_type: orderType.value,
-      guest_count: guestCount,
+    const uuid = await posOfflineClient.ensureCart(registerId, sessionId!, {
+      branchId: String(register?.branchId ?? boot?.branchId ?? boot?.branch_id ?? ''),
+      orderType: orderType.value,
+      guestCount: guestCount,
     });
-    setCartUuid(data.body.uuid);
-    return data.body.uuid as string;
+    setCartUuid(uuid);
+    return uuid;
   }
 
   async function syncCartMeta(uuid: string, patch: Record<string, unknown>) {
-    await api.patch(`/cart/${uuid}`, patch);
+    const body = await posOfflineClient.patchCart(uuid, patch);
+    setCartTotals(mapCartTotals(body));
+  }
+
+  function applyCartResponse(body: Record<string, unknown>) {
+    setItems(mapCartItems((body.items as Array<Record<string, unknown>>) || []));
+    setCartTotals(mapCartTotals(body));
   }
 
   async function addProduct(p: Record<string, unknown>) {
@@ -236,16 +367,39 @@ export default function PosViewerPage() {
       setMessage('Open a POS session first');
       return;
     }
+    const options = (p.options as ProductOption[]) || [];
+    if (p.isCombo || p.is_combo) {
+      setComboProduct(p);
+      return;
+    }
+    if (options.length > 0) {
+      setModifierProduct(p);
+      return;
+    }
+    await addProductToCart(p, [], '');
+  }
+
+  async function addProductToCart(
+    p: Record<string, unknown>,
+    options: Array<{ name: string; group: string; price: number }>,
+    notes: string,
+    course?: string
+  ) {
     setBusy(true);
     try {
       const uuid = await ensureCart();
-      const price = Number(p.specialPrice ?? p.price ?? 0);
-      const { data } = await api.post(`/cart/${uuid}/items`, {
-        product_id: p.id,
+      const price = Number(p.effectivePrice ?? p.specialPrice ?? p.price ?? 0);
+      const body = await posOfflineClient.addCartItem(uuid, {
+        product_id: String(p.id),
         qty: 1,
         unit_price: price,
+        options,
+        notes,
+        course: course || undefined,
+        name: p.name,
+        tax_class: (p.taxClass as string) || (p.tax_class as string) || null,
       });
-      setItems(mapCartItems(data.body.items || []));
+      applyCartResponse(body);
       setOrderPanelOpen(true);
     } catch (err: unknown) {
       setMessage((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Could not add item');
@@ -254,10 +408,37 @@ export default function PosViewerPage() {
     }
   }
 
+  async function onCustomerChange(id: string) {
+    setCustomerId(id);
+    if (cartUuid && id && id !== 'walk-in') {
+      await syncCartMeta(cartUuid, { customer_id: id }).catch(() => undefined);
+      const cust = customers.find((c) => c.id === id);
+      setCustomerLoyaltyBalance(Number(cust?.loyalty_points || 0));
+    } else {
+      setCustomerLoyaltyBalance(0);
+    }
+  }
+
+  async function onWaiterChange(id: string) {
+    setWaiterId(id);
+    if (cartUuid && id) {
+      await syncCartMeta(cartUuid, { waiter_id: id }).catch(() => undefined);
+    }
+  }
+
+  async function onSelectTable(tableId: string, tableName: string) {
+    setOrderMeta((m) => ({ ...m, table_id: tableId, table_name: tableName }));
+    setOrderTypeId('dine_in');
+    if (sessionId) {
+      const uuid = cartUuid || (await ensureCart());
+      await syncCartMeta(uuid, { table_id: tableId, order_type: 'dine_in' });
+    }
+  }
+
   async function removeItem(index: number) {
     if (!cartUuid) return;
-    const { data } = await api.delete(`/cart/${cartUuid}/items/${index}`);
-    setItems(mapCartItems(data.body.items || []));
+    const body = await posOfflineClient.removeCartItem(cartUuid, index);
+    applyCartResponse(body);
   }
 
   async function clearOrder() {
@@ -265,12 +446,13 @@ export default function PosViewerPage() {
     setItems([]);
     setNotes('');
     setGuestCount(1);
+    setCartTotals({ subtotal: 0, taxTotal: 0, serviceCharge: 0, discountTotal: 0, tipAmount: 0, loyaltyPointsRedeemed: 0, total: 0 });
     setMessage('Order cleared');
   }
 
   async function changeOrderType(id: string) {
     setOrderTypeId(id);
-    const next = ORDER_TYPES.find((t) => t.id === id);
+    const next = enabledOrderTypes.find((t) => t.id === id) || ORDER_TYPES.find((t) => t.id === id);
     if (cartUuid && next) {
       await syncCartMeta(cartUuid, { order_type: next.value }).catch(() => undefined);
     }
@@ -288,7 +470,41 @@ export default function PosViewerPage() {
 
   async function checkout(mode: 'pay' | 'kitchen' | 'hold') {
     if (mode === 'hold') {
-      setMessage('Order held on this register');
+      if (!items.length) {
+        setMessage('Add items before holding');
+        return;
+      }
+      if (!sessionId) {
+        setMessage('Open a POS session first');
+        return;
+      }
+      setBusy(true);
+      try {
+        const uuid = await ensureCart();
+        await syncCartMeta(uuid, {
+          notes: notes,
+          customer_id: customerId && customerId !== 'walk-in' ? customerId : null,
+          waiter_id: waiterId || null,
+        });
+        const body = await posOfflineClient.hold(uuid);
+        setMessage(`Held ${body.referenceNo || body.orderNumber}`);
+        setCartUuid(null);
+        setItems([]);
+        setNotes('');
+        setCartTotals({ subtotal: 0, taxTotal: 0, serviceCharge: 0, discountTotal: 0, tipAmount: 0, loyaltyPointsRedeemed: 0, total: 0 });
+      } catch (err: unknown) {
+        setMessage((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Hold failed');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    if (mode === 'pay') {
+      if (!items.length) {
+        setMessage('Add items before continuing');
+        return;
+      }
+      setPaymentOpen(true);
       return;
     }
     if (!items.length) {
@@ -307,20 +523,112 @@ export default function PosViewerPage() {
         .map(([k, v]) => `${k}: ${v}`)
         .join(' | ');
       const mergedNotes = [notes, metaNote].filter(Boolean).join('\n');
-      if (mergedNotes) await syncCartMeta(uuid, { notes: mergedNotes, customer_id: customerId || undefined });
-      const { data } = await api.post(`/cart/${uuid}/checkout`, {
-        mark_paid: mode === 'pay',
-        payment_method: 'cash',
+      await syncCartMeta(uuid, {
+        notes: mergedNotes,
+        customer_id: customerId && customerId !== 'walk-in' ? customerId : null,
+        waiter_id: waiterId || null,
       });
-      setMessage(mode === 'pay' ? `Paid ${data.body.referenceNo}` : `Sent to kitchen ${data.body.referenceNo}`);
+      const body = await posOfflineClient.checkout(uuid, { markPaid: false });
+      setMessage(`Sent to kitchen ${body.referenceNo}`);
       setCartUuid(null);
       setItems([]);
       setNotes('');
+      setCartTotals({ subtotal: 0, taxTotal: 0, serviceCharge: 0, discountTotal: 0, tipAmount: 0, loyaltyPointsRedeemed: 0, total: 0 });
     } catch (err: unknown) {
       setMessage((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Checkout failed');
     } finally {
       setBusy(false);
     }
+  }
+
+  async function completePayment(payments: PaymentLine[], tipAmount: number, sendReceipt: boolean) {
+    setBusy(true);
+    try {
+      const uuid = await ensureCart();
+      const metaNote = Object.entries(orderMeta)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(' | ');
+      const mergedNotes = [notes, metaNote].filter(Boolean).join('\n');
+      await syncCartMeta(uuid, {
+        notes: mergedNotes,
+        customer_id: customerId && customerId !== 'walk-in' ? customerId : null,
+        waiter_id: waiterId || null,
+        tip_amount: tipAmount,
+      });
+      const body = await posOfflineClient.checkout(uuid, {
+        markPaid: true,
+        payments,
+        tipAmount,
+        sendReceipt,
+      });
+      setMessage(`Paid ${body.referenceNo}`);
+      if (orderMeta.table_id) {
+        await posOfflineClient.updateTableStatus(String(orderMeta.table_id), 'dirty');
+      }
+      setCartUuid(null);
+      setItems([]);
+      setNotes('');
+      setCartTotals({ subtotal: 0, taxTotal: 0, serviceCharge: 0, discountTotal: 0, tipAmount: 0, loyaltyPointsRedeemed: 0, total: 0 });
+    } catch (err: unknown) {
+      setMessage((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Payment failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyDiscount() {
+    if (!cartUuid) {
+      setMessage('Add items first');
+      return;
+    }
+    const pct = Number(discountPct || 0);
+    if (!discountPin) {
+      setMessage('Manager PIN required for discounts');
+      return;
+    }
+    await applyDiscountWithPin(pct, discountPin);
+  }
+
+  async function applyLoyalty() {
+    if (!cartUuid || !loyaltyPoints) return;
+    const body = await posOfflineClient.applyLoyalty(cartUuid, Number(loyaltyPoints));
+    applyCartResponse(body);
+    setLoyaltyPoints('');
+    setMessage('Loyalty points applied');
+  }
+
+  async function applyPromotion(promotionId: string) {
+    if (!cartUuid) return;
+    const body = await posOfflineClient.applyPromotion(cartUuid, promotionId);
+    applyCartResponse(body);
+    setPromotionsOpen(false);
+    setMessage('Promotion applied');
+  }
+
+  async function openPromotions() {
+    const branchId = String(register?.branchId ?? boot?.branchId ?? boot?.branch_id ?? '');
+    const list = await posOfflineClient.listPromotions(branchId);
+    setPromotions((list || []) as Array<{ id: string; name: string; type?: string; value?: number }>);
+    setPromotionsOpen(true);
+  }
+
+  async function applyDiscountWithPin(pct: number, pin?: string) {
+    if (!cartUuid) return;
+    const body = await posOfflineClient.applyDiscount(cartUuid, pct, pin);
+    applyCartResponse(body);
+    setDiscountOpen(false);
+    setDiscountPct('');
+    setDiscountPin('');
+    setMessage('Discount applied');
+  }
+
+  async function applyCoupon() {
+    if (!cartUuid || !couponCode.trim()) return;
+    const body = await posOfflineClient.applyCoupon(cartUuid, couponCode.trim());
+    applyCartResponse(body);
+    setCouponCode('');
+    setMessage('Coupon applied');
   }
 
   if (!boot) {
@@ -336,7 +644,9 @@ export default function PosViewerPage() {
   const initial = (user?.name || 'F').charAt(0).toUpperCase();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gradient-to-br from-teal-50 via-[#f4f7f6] to-orange-50 text-slate-900">
+    <div className="flex h-screen flex-col overflow-hidden bg-gradient-to-br from-teal-50 via-[#f4f7f6] to-orange-50 text-slate-900">
+      <OfflineBanner />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Mobile overlays */}
       {sidebarOpen && (
         <button type="button" className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />
@@ -360,7 +670,7 @@ export default function PosViewerPage() {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-2">
-          {ORDER_TYPES.map((type) => {
+          {enabledOrderTypes.map((type) => {
             const Icon = type.icon;
             const active = orderTypeId === type.id;
             return (
@@ -395,6 +705,7 @@ export default function PosViewerPage() {
               </button>
             );
           })}
+          {showAdminLink && (
           <Link
             href="/admin"
             className="mt-1 flex w-full flex-col items-center gap-1 rounded-xl bg-orange-500/20 px-2 py-2.5 text-center text-orange-100 transition hover:bg-orange-500/30"
@@ -402,6 +713,7 @@ export default function PosViewerPage() {
             <LayoutGrid className="h-5 w-5" />
             <span className="text-[11px] font-semibold">Admin</span>
           </Link>
+          )}
         </div>
       </aside>
 
@@ -440,9 +752,25 @@ export default function PosViewerPage() {
               label={`${labelOf(register?.name) || 'Register'} (${String(register?.code || '—')})`}
             />
             {sessionId ? (
-              <span className="btn-solid inline-flex h-9 items-center gap-1.5 rounded-full bg-emerald-500 px-3 text-sm font-bold !text-white shadow-sm">
-                Session open
-              </span>
+              <>
+                <span className="btn-solid inline-flex h-9 items-center gap-1.5 rounded-full bg-emerald-500 px-3 text-sm font-bold !text-white shadow-sm">
+                  Session open
+                </span>
+                <button
+                  type="button"
+                  onClick={runXReport}
+                  className="inline-flex h-9 items-center rounded-full border border-teal-300 bg-white px-3 text-sm font-bold text-teal-800 hover:bg-teal-50"
+                >
+                  X Report
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShiftCloseOpen(true)}
+                  className="inline-flex h-9 items-center rounded-full border border-orange-300 bg-orange-50 px-3 text-sm font-bold text-orange-800 hover:bg-orange-100"
+                >
+                  Z Report / Close
+                </button>
+              </>
             ) : (
               <button
                 type="button"
@@ -560,7 +888,7 @@ export default function PosViewerPage() {
                       </div>
                       <div className="line-clamp-2 text-sm font-bold text-slate-900">{labelOf(p.name)}</div>
                       <div className="mt-2 text-base font-extrabold text-teal-800">
-                        {money(Number(p.specialPrice ?? p.price ?? 0), currency)}
+                        {money(Number(p.effectivePrice ?? p.specialPrice ?? p.price ?? 0), currency)}
                       </div>
                     </button>
                   ))}
@@ -610,7 +938,7 @@ export default function PosViewerPage() {
                   <select
                     className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-8 text-sm font-medium text-slate-800 outline-none focus:border-teal-500"
                     value={waiterId}
-                    onChange={(e) => setWaiterId(e.target.value)}
+                    onChange={(e) => onWaiterChange(e.target.value)}
                   >
                     <option value="">Select Waiter</option>
                     {waiters.map((w) => (
@@ -627,7 +955,7 @@ export default function PosViewerPage() {
                     <select
                       className="h-10 w-full appearance-none rounded-xl border border-slate-300 bg-white pl-9 pr-8 text-sm font-medium text-slate-800 outline-none focus:border-sky-500"
                       value={customerId}
-                      onChange={(e) => setCustomerId(e.target.value)}
+                      onChange={(e) => onCustomerChange(e.target.value)}
                     >
                       <option value="">Select Customer</option>
                       <option value="walk-in">Walk-in</option>
@@ -693,6 +1021,12 @@ export default function PosViewerPage() {
                           <div className="mt-0.5 text-xs font-medium text-slate-600">
                             {item.qty} × {money(item.unitPrice, currency)}
                           </div>
+                          {item.options?.length ? (
+                            <div className="mt-1 text-[11px] text-slate-500">
+                              {item.options.map((o) => `${o.group}: ${o.name}`).join(', ')}
+                            </div>
+                          ) : null}
+                          {item.notes ? <div className="mt-0.5 text-[11px] italic text-slate-500">{item.notes}</div> : null}
                         </div>
                         <div className="text-right">
                           <div className="text-sm font-extrabold text-teal-800">{money(item.lineTotal, currency)}</div>
@@ -729,12 +1063,31 @@ export default function PosViewerPage() {
               </label>
 
               <div className="mb-3 grid grid-cols-2 gap-2">
-                <button type="button" className="h-10 rounded-xl border border-amber-300 bg-amber-50 text-sm font-bold text-amber-800 hover:bg-amber-100">
+                <button type="button" className="h-10 rounded-xl border border-amber-300 bg-amber-50 text-sm font-bold text-amber-800 hover:bg-amber-100" onClick={() => setDiscountOpen(true)}>
                   Discount
                 </button>
-                <button type="button" className="h-10 rounded-xl border border-violet-300 bg-violet-50 text-sm font-bold text-violet-800 hover:bg-violet-100">
+                <button type="button" className="h-10 rounded-xl border border-violet-300 bg-violet-50 text-sm font-bold text-violet-800 hover:bg-violet-100" onClick={() => setCouponOpen(true)}>
                   Voucher
                 </button>
+                <button type="button" className="h-10 rounded-xl border border-teal-300 bg-teal-50 text-sm font-bold text-teal-800 hover:bg-teal-100" onClick={openPromotions}>
+                  Promotions
+                </button>
+                {customerId && customerId !== 'walk-in' ? (
+                  <div className="col-span-2 rounded-xl border border-emerald-200 bg-emerald-50 p-2 text-xs">
+                    <div className="font-bold text-emerald-900">Loyalty balance: {customerLoyaltyBalance} pts</div>
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        className="h-8 flex-1 rounded-lg border px-2"
+                        placeholder="Points to redeem"
+                        value={loyaltyPoints}
+                        onChange={(e) => setLoyaltyPoints(e.target.value)}
+                      />
+                      <button type="button" className="rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white" onClick={applyLoyalty}>
+                        Redeem
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="mb-3 space-y-1.5 rounded-xl bg-white p-3 text-sm shadow-sm ring-1 ring-slate-200">
@@ -743,9 +1096,21 @@ export default function PosViewerPage() {
                   <span className="font-bold text-slate-900">{money(subtotal, currency)}</span>
                 </div>
                 <div className="flex justify-between font-medium text-slate-700">
-                  <span>VAT 15%</span>
+                  <span>{taxLabel}</span>
                   <span className="font-bold text-slate-900">{money(vat, currency)}</span>
                 </div>
+                {serviceCharge > 0 && (
+                  <div className="flex justify-between font-medium text-slate-700">
+                    <span>Service charge</span>
+                    <span className="font-bold text-slate-900">{money(serviceCharge, currency)}</span>
+                  </div>
+                )}
+                {discountTotal > 0 && (
+                  <div className="flex justify-between font-medium text-rose-700">
+                    <span>Discount</span>
+                    <span className="font-bold">−{money(discountTotal, currency)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-extrabold text-slate-900">
                   <span>Total</span>
                   <span className="text-orange-700">{money(total, currency)}</span>
@@ -786,6 +1151,7 @@ export default function PosViewerPage() {
           </aside>
         </div>
       </div>
+      </div>
 
       <PosModules
         active={activeModule}
@@ -793,11 +1159,165 @@ export default function PosViewerPage() {
         sessionId={sessionId}
         branchId={String(register?.branchId || '')}
         currency={currency}
-        onSelectTable={(tableId, tableName) => {
-          setOrderMeta((m) => ({ ...m, table_id: tableId, table_name: tableName }));
-          setOrderTypeId('dine_in');
+        onSelectTable={onSelectTable}
+      />
+      <ModifierModal
+        open={modifierProduct !== null}
+        productName={modifierProduct?.name}
+        options={(modifierProduct?.options as ProductOption[]) || []}
+        onClose={() => setModifierProduct(null)}
+        onConfirm={(options, notes, course) => {
+          if (modifierProduct) addProductToCart(modifierProduct, options, notes, course);
+          setModifierProduct(null);
         }}
       />
+      <ComboPickerModal
+        open={comboProduct !== null}
+        productName={comboProduct?.name}
+        comboPrice={Number(comboProduct?.effectivePrice ?? comboProduct?.price ?? 0)}
+        currency={currency}
+        items={(comboProduct?.comboItems as ComboItem[]) || []}
+        onClose={() => setComboProduct(null)}
+        onConfirm={(notes) => {
+          if (comboProduct) addProductToCart(comboProduct, [], notes);
+          setComboProduct(null);
+        }}
+      />
+      <PaymentModal
+        open={paymentOpen}
+        total={total}
+        currency={currency}
+        quickPayAmounts={pricing?.quickPayAmounts}
+        paymentMethods={pricing?.paymentMethods}
+        breakdown={{
+          subtotal,
+          discountTotal,
+          loyaltyRedeemed: cartTotals.loyaltyPointsRedeemed,
+          taxTotal: vat,
+          serviceCharge,
+        }}
+        customerEmail={customerEmail}
+        onClose={() => setPaymentOpen(false)}
+        onConfirm={completePayment}
+      />
+      {discountOpen && (
+        <>
+          <button type="button" className="fixed inset-0 z-[100] bg-black/50" onClick={() => setDiscountOpen(false)} aria-label="Close" />
+          <div className="fixed left-1/2 top-1/2 z-[110] w-[min(400px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-900">Apply discount</h3>
+            <label className="mt-3 block text-xs font-bold text-slate-700">
+              Percent (%)
+              <input
+                type="number"
+                min={0}
+                max={100}
+                className="mt-1 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm"
+                value={discountPct}
+                onChange={(e) => setDiscountPct(e.target.value)}
+              />
+            </label>
+            {Number(discountPct) > 0 && (
+              <label className="mt-3 block text-xs font-bold text-slate-700">
+                Manager PIN (required)
+                <input
+                  type="password"
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm"
+                  value={discountPin}
+                  onChange={(e) => setDiscountPin(e.target.value)}
+                />
+              </label>
+            )}
+            <div className="mt-4 flex gap-2">
+              <button type="button" className="flex-1 rounded-xl border py-2 text-sm font-bold" onClick={() => setDiscountOpen(false)}>Cancel</button>
+              <button type="button" className="btn-solid flex-1 rounded-xl bg-amber-500 py-2 text-sm font-bold !text-white" onClick={applyDiscount}>Apply</button>
+            </div>
+          </div>
+        </>
+      )}
+      {couponOpen && (
+        <>
+          <button type="button" className="fixed inset-0 z-[100] bg-black/50" onClick={() => setCouponOpen(false)} aria-label="Close" />
+          <div className="fixed left-1/2 top-1/2 z-[110] w-[min(400px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-900">Apply voucher</h3>
+            <input
+              className="mt-3 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm"
+              placeholder="Coupon code"
+              value={couponCode}
+              onChange={(e) => setCouponCode(e.target.value)}
+            />
+            <div className="mt-4 flex gap-2">
+              <button type="button" className="flex-1 rounded-xl border py-2 text-sm font-bold" onClick={() => setCouponOpen(false)}>Cancel</button>
+              <button
+                type="button"
+                className="btn-solid flex-1 rounded-xl bg-violet-600 py-2 text-sm font-bold !text-white"
+                onClick={() => {
+                  applyCoupon();
+                  setCouponOpen(false);
+                }}
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+      {promotionsOpen && (
+        <>
+          <button type="button" className="fixed inset-0 z-[100] bg-black/50" onClick={() => setPromotionsOpen(false)} aria-label="Close" />
+          <div className="fixed left-1/2 top-1/2 z-[110] w-[min(400px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-900">Eligible promotions</h3>
+            <p className="mt-1 text-xs text-slate-500">Promotion OR voucher — not both.</p>
+            <ul className="mt-3 space-y-2">
+              {promotions.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    className="w-full rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-left text-sm font-semibold text-teal-900 hover:bg-teal-100"
+                    onClick={() => applyPromotion(p.id)}
+                  >
+                    {p.name} — {p.type === 'percent' ? `${p.value}%` : p.value}
+                  </button>
+                </li>
+              ))}
+              {!promotions.length ? <li className="text-sm text-slate-500">No active promotions</li> : null}
+            </ul>
+          </div>
+        </>
+      )}
+      <ShiftCloseModal
+        open={shiftCloseOpen}
+        sessionId={sessionId}
+        currency={currency}
+        onClose={() => setShiftCloseOpen(false)}
+        onClosed={() => {
+          setSessionId(null);
+          setShiftCloseOpen(false);
+        }}
+      />
+      {floatOpen && (
+        <>
+          <button type="button" className="fixed inset-0 z-[100] bg-black/50" onClick={() => setFloatOpen(false)} aria-label="Close" />
+          <div className="fixed left-1/2 top-1/2 z-[110] w-[min(400px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-900">Opening float</h3>
+            <p className="mt-1 text-sm text-slate-600">Enter cash in drawer before starting shift.</p>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              className="mt-3 h-10 w-full rounded-xl border border-slate-300 px-3 text-sm"
+              placeholder="Opening float amount"
+              value={openingFloat}
+              onChange={(e) => setOpeningFloat(e.target.value)}
+            />
+            <div className="mt-4 flex gap-2">
+              <button type="button" className="flex-1 rounded-xl border py-2 text-sm font-bold" onClick={() => setFloatOpen(false)}>Cancel</button>
+              <button type="button" disabled={busy} className="btn-solid flex-1 rounded-xl bg-teal-600 py-2 text-sm font-bold !text-white disabled:opacity-50" onClick={confirmOpenSession}>
+                Open session
+              </button>
+            </div>
+          </div>
+        </>
+      )}
       <PosHomeDeliveryModal
         open={deliveryOpen}
         onClose={() => setDeliveryOpen(false)}

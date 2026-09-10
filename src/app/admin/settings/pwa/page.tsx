@@ -9,6 +9,11 @@ export default function PwaSettingsPage() {
       section="pwa"
       title="PWA"
       icon={<Smartphone className="h-5 w-5 text-brand" />}
+      banner={
+        <div className="rounded-xl border border-border bg-surface-muted/40 px-4 py-3 text-sm text-muted">
+          Enable PWA to install the POS on tablets. After saving, open <strong>Admin → POS</strong> once while online, then use Install from the register picker or browser menu. Offline sales sync when connection returns.
+        </div>
+      }
       defaults={{
         pwa_enabled: false,
         pwa_name: 'Forkiva',

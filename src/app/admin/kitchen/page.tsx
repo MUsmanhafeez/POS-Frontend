@@ -69,16 +69,33 @@ const ORDER_TYPES = [
   { id: 'delivery', name: 'Delivery' },
 ];
 
+const STATIONS = [
+  { id: '', label: 'All stations' },
+  { id: 'grill', label: 'Grill' },
+  { id: 'bar', label: 'Bar' },
+  { id: 'cold', label: 'Cold' },
+  { id: 'dessert', label: 'Dessert' },
+];
+
 export default function KitchenPage() {
   const user = useAuthStore((s) => s.user);
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [branchId, setBranchId] = useState('');
   const [orderType, setOrderType] = useState('');
+  const [station, setStation] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [advancingId, setAdvancingId] = useState<string | null>(null);
+  const [kitchenAutoRefresh, setKitchenAutoRefresh] = useState(true);
+
+  useEffect(() => {
+    api.get('/settings/kitchen')
+      .then((res) => setKitchenAutoRefresh(Boolean(res.data.body?.kitchen_auto_refresh ?? true)))
+      .catch(() => setKitchenAutoRefresh(true));
+  }, []);
+  const [soundOn, setSoundOn] = useState(false);
 
   const loadBranches = useCallback(async () => {
     const { data } = await api.get('/branches');
@@ -100,6 +117,7 @@ export default function KitchenPage() {
           params: {
             branch_id: branchId,
             ...(orderType ? { type: orderType } : {}),
+            ...(station ? { station } : {}),
             ...(search.trim() ? { search: search.trim() } : {}),
           },
         });
@@ -109,7 +127,7 @@ export default function KitchenPage() {
         setRefreshing(false);
       }
     },
-    [branchId, orderType, search]
+    [branchId, orderType, station, search]
   );
 
   useEffect(() => {
@@ -119,9 +137,10 @@ export default function KitchenPage() {
   useEffect(() => {
     if (!branchId) return;
     loadOrders().catch(console.error);
+    if (!kitchenAutoRefresh) return;
     const t = setInterval(() => loadOrders(true).catch(console.error), 5000);
     return () => clearInterval(t);
-  }, [branchId, loadOrders]);
+  }, [branchId, loadOrders, kitchenAutoRefresh]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -217,7 +236,28 @@ export default function KitchenPage() {
           ))}
         </select>
 
+        <div className="flex flex-wrap gap-1">
+          {STATIONS.map((s) => (
+            <button
+              key={s.id || 'all'}
+              type="button"
+              onClick={() => setStation(s.id)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold ${station === s.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
         <div className="ml-auto hidden items-center gap-2 text-xs font-semibold text-slate-500 sm:flex">
+          <button
+            type="button"
+            className={`rounded-lg px-2 py-1 ${soundOn ? 'bg-blue-100 text-blue-800' : 'bg-slate-100'}`}
+            onClick={() => setSoundOn((v) => !v)}
+          >
+            Sound {soundOn ? 'on' : 'off'}
+          </button>
+          <span>5s poll (v1)</span>
           <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
           Kitchen Viewer
         </div>
@@ -276,6 +316,15 @@ export default function KitchenPage() {
   );
 }
 
+function parseAgeMinutes(order: KitchenOrder): number {
+  const raw = String(order.status_duration || order.created_ago || '');
+  const minMatch = raw.match(/(\d+)\s*m/i);
+  if (minMatch) return Number(minMatch[1]);
+  const hrMatch = raw.match(/(\d+)\s*h/i);
+  if (hrMatch) return Number(hrMatch[1]) * 60;
+  return 0;
+}
+
 function OrderCard({
   order,
   columnColor,
@@ -291,9 +340,12 @@ function OrderCard({
   const moveLabel = order.status?.id ? MOVE_LABELS[order.status.id] : null;
   const typeLabel = `${order.type?.name || 'Order'} #${order.order_number}`;
   const paid = order.payment_status?.id === 'paid';
+  const ageMin = parseAgeMinutes(order);
+  const agingClass =
+    ageMin >= 30 ? 'border-rose-400 ring-2 ring-rose-200 bg-rose-50/40' : ageMin >= 15 ? 'border-amber-400 ring-2 ring-amber-200' : 'border-slate-200';
 
   return (
-    <article className="flex max-h-[min(70vh,560px)] shrink-0 flex-col overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+    <article className={`flex max-h-[min(70vh,560px)] shrink-0 flex-col overflow-hidden rounded-[14px] border bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)] ${agingClass}`}>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex items-center justify-between gap-2 px-3.5 pb-1.5 pt-3.5">
           <div className="flex min-w-0 items-center gap-2">

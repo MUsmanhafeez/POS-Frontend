@@ -9,6 +9,7 @@ import IdleTimeoutGuard from '@/components/admin/IdleTimeoutGuard';
 import { useAuthStore } from '@/stores/auth';
 import { useLocaleStore, useT } from '@/stores/locale';
 import { useNavPending } from '@/stores/navPending';
+import { useAppSettingsStore } from '@/stores/appSettings';
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -18,6 +19,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const locale = useLocaleStore((s) => s.locale);
   const navPending = useNavPending((s) => s.pending);
   const donePending = useNavPending((s) => s.done);
+  const appName = useAppSettingsStore((s) => s.appName);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -60,7 +62,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       <div className="grid min-h-screen place-items-center bg-background text-muted">
         <div className="flex flex-col items-center gap-3">
           <div className="h-10 w-10 animate-pulse rounded-xl bg-brand/20" />
-          <span className="text-sm">{t('Loading Forkiva…')}</span>
+          <span className="text-sm">Loading {appName}…</span>
         </div>
       </div>
     );

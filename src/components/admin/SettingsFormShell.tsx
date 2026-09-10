@@ -6,6 +6,8 @@ import api from '@/lib/api';
 import { Field } from '@/components/ui';
 import { btnPrimary, btnSecondary, fieldClass } from '@/lib/ui';
 import { useThemeStore } from '@/stores/theme';
+import { useLocaleStore } from '@/stores/locale';
+import { useAppSettingsStore } from '@/stores/appSettings';
 import type { AppearanceColors } from '@/lib/theme';
 
 type Props = {
@@ -22,6 +24,14 @@ type Props = {
   showReset?: boolean;
 };
 
+function pickPayload(form: Record<string, unknown>, defaults: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(defaults)) {
+    if (key in form) out[key] = form[key];
+  }
+  return out;
+}
+
 export default function SettingsFormShell({
   section,
   title,
@@ -35,12 +45,14 @@ export default function SettingsFormShell({
   const [form, setForm] = useState<Record<string, unknown>>(defaults);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [messageType, setMessageType] = useState<'success' | 'error'>('success');
 
   useEffect(() => {
     api
       .get(`/settings/${section}`)
       .then((r) => setForm({ ...defaults, ...(r.data.body || {}) }))
       .catch(() => setForm(defaults));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section]);
 
   useEffect(() => {
@@ -63,12 +75,29 @@ export default function SettingsFormShell({
     setSaving(true);
     setMessage('');
     try {
-      await api.put(`/settings/${section}`, form);
+      const payload = pickPayload(form, defaults);
+      await api.put(`/settings/${section}`, payload);
+      const { data } = await api.get(`/settings/${section}`);
+      const merged = { ...defaults, ...(data.body || {}) };
+      setForm(merged);
+
       if (section === 'appearance') {
-        useThemeStore.getState().apply(form as AppearanceColors);
+        useThemeStore.getState().apply(merged as AppearanceColors);
       }
-      setMessage('Settings has been updated successfully.');
+      if (section === 'general' && merged.default_locale) {
+        const loc = String(merged.default_locale);
+        if (loc === 'en' || loc === 'ar') {
+          useLocaleStore.getState().setLocale(loc);
+        }
+      }
+      if (section === 'application' && merged.app_name) {
+        useAppSettingsStore.getState().setAppName(String(merged.app_name));
+      }
+
+      setMessageType('success');
+      setMessage('Settings saved successfully.');
     } catch (err: unknown) {
+      setMessageType('error');
       setMessage((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Save failed');
     } finally {
       setSaving(false);
@@ -105,12 +134,19 @@ export default function SettingsFormShell({
         <button type="submit" className={btnPrimary} disabled={saving}>
           <Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save'}
         </button>
+      </div>
+
       {message ? (
-        <div className="fixed end-4 top-4 z-50 rounded-xl border border-success/30 bg-success-soft px-4 py-3 text-sm font-semibold text-success shadow-lg">
+        <div
+          className={`fixed end-4 top-4 z-50 rounded-xl border px-4 py-3 text-sm font-semibold shadow-lg ${
+            messageType === 'success'
+              ? 'border-success/30 bg-success-soft text-success'
+              : 'border-danger/30 bg-danger-soft text-danger'
+          }`}
+        >
           {message}
         </div>
       ) : null}
-      </div>
     </form>
   );
 }

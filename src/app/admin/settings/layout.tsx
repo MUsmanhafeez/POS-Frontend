@@ -5,10 +5,12 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import clsx from 'clsx';
 import { SETTINGS_NAV } from '@/lib/nav';
+import { useAppSettingsStore } from '@/stores/appSettings';
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const appName = useAppSettingsStore((s) => s.appName);
 
   useEffect(() => {
     if (pathname === '/admin/settings') {
@@ -19,7 +21,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   return (
     <div className="mx-auto max-w-6xl">
       <div className="mb-5">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Forkiva Settings</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">{appName} Settings</h1>
         <p className="mt-1 text-sm text-muted">Configure locales, appearance, kitchen, and system defaults.</p>
       </div>
 

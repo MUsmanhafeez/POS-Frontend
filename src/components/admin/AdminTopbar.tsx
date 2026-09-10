@@ -21,6 +21,7 @@ import clsx from 'clsx';
 import { useAuthStore } from '@/stores/auth';
 import { useLocaleStore, useT } from '@/stores/locale';
 import { useThemeStore } from '@/stores/theme';
+import MasterSearch from '@/components/admin/MasterSearch';
 
 type Props = {
   onToggleSidebar?: () => void;
@@ -86,7 +87,7 @@ export default function AdminTopbar({ onToggleSidebar }: Props) {
 
   return (
     <header className="sticky top-0 z-20 flex h-[var(--topbar-height)] items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 backdrop-blur">
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2 md:flex-1">
         <button
           type="button"
           onClick={onToggleSidebar}
@@ -100,7 +101,9 @@ export default function AdminTopbar({ onToggleSidebar }: Props) {
         </div>
       </div>
 
-      <div className="relative flex items-center gap-1.5">
+      <MasterSearch />
+
+      <div className="relative flex items-center gap-1.5 shrink-0">
         <TopIconButton label={t('Kitchen viewer')} onClick={() => router.push('/admin/kitchen')}>
           <ChefHat className="h-4 w-4" />
         </TopIconButton>

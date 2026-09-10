@@ -39,18 +39,43 @@ export default function GeneralSettingsPage() {
             </select>
           </FloatingField>
           <FloatingField label="Supported locales">
-            <div className={`${fieldClass} flex flex-wrap gap-2`}>
-              {(Array.isArray(form.supported_locales) ? (form.supported_locales as string[]) : ['en']).map((locale) => (
-                <span key={locale} className="rounded-lg bg-brand-soft px-2.5 py-1 text-xs font-semibold text-brand">
-                  {locale === 'en' ? 'English' : locale === 'ar' ? 'Arabic' : locale}
-                </span>
-              ))}
+            <div className={`${fieldClass} flex flex-wrap gap-3 py-2`}>
+              {(['en', 'ar'] as const).map((locale) => {
+                const selected = Array.isArray(form.supported_locales)
+                  ? (form.supported_locales as string[]).includes(locale)
+                  : locale === 'en';
+                return (
+                  <label key={locale} className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-[var(--brand)]"
+                      checked={selected}
+                      onChange={(e) => {
+                        const current = Array.isArray(form.supported_locales)
+                          ? [...(form.supported_locales as string[])]
+                          : ['en'];
+                        if (e.target.checked) {
+                          if (!current.includes(locale)) current.push(locale);
+                        } else {
+                          const idx = current.indexOf(locale);
+                          if (idx >= 0) current.splice(idx, 1);
+                        }
+                        set('supported_locales', current.length ? current : ['en']);
+                      }}
+                    />
+                    {locale === 'en' ? 'English' : 'Arabic'}
+                  </label>
+                );
+              })}
             </div>
           </FloatingField>
           <FloatingField label="Default Locale">
             <select className={fieldClass} value={String(form.default_locale || 'en')} onChange={(e) => set('default_locale', e.target.value)}>
-              <option value="en">English</option>
-              <option value="ar">Arabic</option>
+              {(Array.isArray(form.supported_locales) ? (form.supported_locales as string[]) : ['en', 'ar']).map((locale) => (
+                <option key={locale} value={locale}>
+                  {locale === 'en' ? 'English' : locale === 'ar' ? 'Arabic' : locale}
+                </option>
+              ))}
             </select>
           </FloatingField>
           <FloatingField label="Default Timezone">

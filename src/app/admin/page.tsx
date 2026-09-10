@@ -4,28 +4,35 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowUpRight,
+  BarChart3,
   Boxes,
-  Building2,
-  CalendarClock,
   ChefHat,
   Clock3,
-  FolderOpen,
-  Grid2x2,
-  Image as ImageIcon,
   LayoutDashboard,
-  MapPinned,
   MonitorSmartphone,
   Package,
   Receipt,
   ShoppingBag,
   Store,
-  Tag,
+  TrendingUp,
   Users,
   Wallet,
+  AlertTriangle,
 } from 'lucide-react';
 import api from '@/lib/api';
-import { Card, PageHeader, Badge } from '@/components/ui';
+import { useAuthStore } from '@/stores/auth';
+import { Card, Badge } from '@/components/ui';
 import { btnAccent, btnSecondary, fieldClass, labelOf, softPalette } from '@/lib/ui';
+import {
+  AreaLineChart,
+  BarChart,
+  DonutChart,
+  ForecastBarChart,
+  StatSparkline,
+  buildDailySeries,
+  buildHourlySeries,
+  type ChartPoint,
+} from '@/components/admin/dashboard/DashboardCharts';
 
 type Overview = {
   currency?: string;
@@ -33,29 +40,11 @@ type Overview = {
   total_orders: number;
   total_active_orders: number;
   average_order_value: number;
-  total_users: number;
-  total_menus: number;
-  total_products: number;
-  total_categories: number;
-  total_branches: number;
-  total_registers: number;
-  total_shifts: number;
-  total_shift_sessions: number;
   open_pos_sessions: number;
-  total_floors: number;
-  total_zones: number;
-  total_tables: number;
-  total_table_merges: number;
-  total_options: number;
-  total_online_menus: number;
-  total_inventory_items: number;
-  low_stock_count: number;
-  total_promotions: number;
-  total_discounts: number;
-  total_vouchers: number;
-  total_media: number;
-  total_invoices: number;
   unpaid_orders: number;
+  void_rate_7d?: number;
+  discount_total_7d?: number;
+  avg_prep_minutes?: number;
   hourly_sales: { hour: number; total: number; orders: number }[];
   sales_analytics: { day: string; total: number; orders: number }[];
   top_products: { id: string; name: unknown; price: number; sku?: string }[];
@@ -64,296 +53,406 @@ type Overview = {
   order_statuses: { label: string; value: number }[];
   low_stock_items: { id: string; name: string; quantity: number; reorder_level: number; unit?: string }[];
   payments_overview: { label: string; value: number; amount: number }[];
+  payment_mix_7d?: Array<{ method: string; txn_count: number; total: number }>;
 };
 
-function money(n: number, currency = 'JOD') {
-  return `${currency} ${Number(n || 0).toFixed(3)}`;
-}
+type Insights = {
+  demand_forecast?: Array<{ item: string; forecast_qty: number; last_week_qty?: number }>;
+  sales_7d?: { total: number; orders: number };
+  fraud_signal?: { void_rate_pct?: number; level?: string };
+  payment_mix?: Array<{ method: string; total: number; txn_count?: number }>;
+};
 
-function EmptyState({ text = 'No data available' }: { text?: string }) {
-  return <p className="py-10 text-center text-sm font-medium text-muted">{text}</p>;
+function money(n: number, currency = 'PKR') {
+  const d = currency === 'JOD' ? 3 : 2;
+  return `${currency} ${Number(n || 0).toFixed(d)}`;
 }
 
 function Panel({
   title,
+  subtitle,
   action,
   children,
   className = '',
 }: {
   title: string;
+  subtitle?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
   return (
     <Card className={`overflow-hidden ${className}`}>
-      <div className="flex items-center justify-between gap-3 border-b border-border bg-surface-muted/40 px-4 py-3 sm:px-5">
-        <h2 className="text-sm font-bold text-foreground sm:text-base">{title}</h2>
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-surface-muted/40 px-4 py-3 sm:px-5">
+        <div>
+          <h2 className="text-sm font-bold text-foreground sm:text-base">{title}</h2>
+          {subtitle ? <p className="mt-0.5 text-xs text-muted">{subtitle}</p> : null}
+        </div>
         {action}
       </div>
-      <div className="p-4 sm:p-5">{children}</div>
+      <div className="p-3 sm:p-4">{children}</div>
     </Card>
   );
 }
 
-function MiniBars({
-  items,
-  valueKey = 'total',
-}: {
-  items: Array<Record<string, unknown>>;
-  valueKey?: string;
-}) {
-  if (!items.length) return <EmptyState />;
-  const max = Math.max(...items.map((i) => Number(i[valueKey] || 0)), 1);
-  return (
-    <div className="space-y-2.5">
-      {items.map((item, idx) => {
-        const value = Number(item[valueKey] || 0);
-        const label = String(item.label ?? item.day ?? item.hour ?? `#${idx + 1}`);
-        return (
-          <div key={`${label}-${idx}`}>
-            <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-              <span className="font-medium text-foreground">{label}</span>
-              <span className="text-muted">{value}</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-surface-muted">
-              <div
-                className="h-full rounded-full bg-brand"
-                style={{ width: `${Math.max(6, (value / max) * 100)}%` }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function AdminDashboardPage() {
+  const user = useAuthStore((s) => s.user);
   const [data, setData] = useState<Overview | null>(null);
-  const [salesRange, setSalesRange] = useState('weekly');
-  const [topRange, setTopRange] = useState('all');
+  const [insights, setInsights] = useState<Insights | null>(null);
+  const [occasionAlerts, setOccasionAlerts] = useState<Array<{ name: string; days_until: number }>>([]);
+  const [range, setRange] = useState('weekly');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api
-      .get('/dashboards/overview', { params: { range: topRange === 'weekly' ? 'weekly' : 'all' } })
-      .then((res) => setData(res.data.body))
-      .catch(console.error);
-  }, [topRange]);
+    setLoading(true);
+    Promise.all([
+      api.get('/dashboards/overview', { params: { range: range === 'daily' ? 'daily' : range === 'weekly' ? 'weekly' : 'all' } }),
+      api.get('/analytics/insights'),
+      api.get('/analytics/occasion-alerts'),
+    ])
+      .then(([overview, ins, alerts]) => {
+        setData(overview.data.body);
+        setInsights(ins.data.body);
+        setOccasionAlerts(alerts.data.body?.alerts || []);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [range]);
 
-  const currency = data?.currency || 'JOD';
+  const currency = data?.currency || 'PKR';
+  const fmt = (n: number) => money(n, currency);
 
-  const primaryCards = useMemo(
-    () => [
-      { label: 'Total Sales', value: data ? money(data.total_sales, currency) : '—', icon: Store },
-      { label: 'Total Orders', value: data?.total_orders ?? '—', icon: ShoppingBag },
-      { label: 'Total Active Orders', value: data?.total_active_orders ?? '—', icon: Receipt },
-      { label: 'Average Order Value', value: data ? money(data.average_order_value, currency) : '—', icon: LayoutDashboard },
-      { label: 'Total Users', value: data?.total_users ?? '—', icon: Users },
-      { label: 'Total Menus', value: data?.total_menus ?? '—', icon: Grid2x2 },
-      { label: 'Total Products', value: data?.total_products ?? '—', icon: Package },
-      { label: 'Total Categories', value: data?.total_categories ?? '—', icon: FolderOpen },
-    ],
-    [data, currency]
+  const salesTrend: ChartPoint[] = useMemo(
+    () => buildDailySeries(data?.sales_analytics || [], 7),
+    [data?.sales_analytics]
   );
 
-  const moduleCards = useMemo(
-    () => [
-      { label: 'Branches', value: data?.total_branches ?? 0, href: '/admin/branches', icon: Building2 },
-      { label: 'Registers', value: data?.total_registers ?? 0, href: '/admin/registers', icon: MonitorSmartphone },
-      { label: 'Open POS Sessions', value: data?.open_pos_sessions ?? 0, href: '/admin/pos/opening-closing', icon: Clock3 },
-      { label: 'Shifts', value: data?.total_shifts ?? 0, href: '/admin/shifts', icon: CalendarClock },
-      { label: 'Shift Sessions', value: data?.total_shift_sessions ?? 0, href: '/admin/shift-sessions', icon: CalendarClock },
-      { label: 'Options', value: data?.total_options ?? 0, href: '/admin/options', icon: Grid2x2 },
-      { label: 'Floors', value: data?.total_floors ?? 0, href: '/admin/seating/floors', icon: MapPinned },
-      { label: 'Zones', value: data?.total_zones ?? 0, href: '/admin/seating/zones', icon: MapPinned },
-      { label: 'Tables', value: data?.total_tables ?? 0, href: '/admin/seating/tables', icon: MapPinned },
-      { label: 'Ingredients', value: data?.total_inventory_items ?? 0, href: '/admin/inventory', icon: Boxes },
-      { label: 'Low Stock', value: data?.low_stock_count ?? 0, href: '/admin/inventory', icon: Boxes },
-      { label: 'Discounts', value: data?.total_discounts ?? 0, href: '/admin/promotions', icon: Tag },
-      { label: 'Media', value: data?.total_media ?? 0, href: '/admin/media', icon: ImageIcon },
-      { label: 'Invoices', value: data?.total_invoices ?? 0, href: '/admin/sales/invoices', icon: Receipt },
-      { label: 'Unpaid Orders', value: data?.unpaid_orders ?? 0, href: '/admin/sales/payments', icon: Wallet },
-      { label: 'Kitchen', value: data?.total_active_orders ?? 0, href: '/admin/kitchen', icon: ChefHat },
-    ],
-    [data]
+  const hourlyChart: ChartPoint[] = useMemo(
+    () => buildHourlySeries(data?.hourly_sales || []),
+    [data?.hourly_sales]
   );
 
-  const hourly = (data?.hourly_sales || []).map((h) => ({
-    label: `${String(h.hour).padStart(2, '0')}:00`,
-    total: h.total,
-  }));
+  const paymentMixData: ChartPoint[] = useMemo(() => {
+    const fromPayments = (data?.payment_mix_7d || []).filter((p) => Number(p.total) > 0);
+    if (fromPayments.length) {
+      return fromPayments.map((p) => ({ label: p.method, value: p.total }));
+    }
+    const fromInsights = (insights?.payment_mix || []).filter((p) => Number(p.total) > 0);
+    if (fromInsights.length) {
+      return fromInsights.map((p) => ({ label: p.method, value: p.total }));
+    }
+    const fromStatus = (data?.payments_overview || []).filter((p) => Number(p.amount) > 0);
+    if (fromStatus.length) {
+      return fromStatus.map((p) => ({ label: p.label, value: p.amount }));
+    }
+    return [];
+  }, [data?.payment_mix_7d, data?.payments_overview, insights?.payment_mix]);
 
-  const salesAnalytics = (data?.sales_analytics || []).map((d) => ({
-    label: String(d.day).slice(5),
-    total: d.total,
-  }));
+  const orderTypeData: ChartPoint[] = useMemo(
+    () => (data?.order_types || []).map((t) => ({ label: t.label, value: t.value })),
+    [data?.order_types]
+  );
+
+  const forecastRows = useMemo(
+    () =>
+      (insights?.demand_forecast || []).slice(0, 8).map((r) => ({
+        label: String(r.item).slice(0, 28),
+        lastWeek: Number(r.last_week_qty || 0),
+        forecast: Number(r.forecast_qty || 0),
+      })),
+    [insights?.demand_forecast]
+  );
+
+  const kpiCards = useMemo(
+    () => [
+      {
+        label: 'Total sales',
+        value: data ? fmt(data.total_sales) : '—',
+        hint: range === 'daily' ? 'Today' : range === 'weekly' ? 'Last 7 days' : 'All time',
+        icon: Store,
+        spark: salesTrend.map((s) => s.value),
+      },
+      {
+        label: 'Orders',
+        value: data?.total_orders ?? '—',
+        hint: `${data?.total_active_orders ?? 0} active now`,
+        icon: ShoppingBag,
+        spark: salesTrend.map((s) => s.value),
+      },
+      {
+        label: 'Average order',
+        value: data ? fmt(data.average_order_value) : '—',
+        hint: 'Per completed order',
+        icon: TrendingUp,
+      },
+      {
+        label: 'Open sessions',
+        value: data?.open_pos_sessions ?? '—',
+        hint: 'Registers with open shift',
+        icon: MonitorSmartphone,
+      },
+      {
+        label: 'Void rate',
+        value: data?.void_rate_7d != null ? `${data.void_rate_7d}%` : '—',
+        hint: insights?.fraud_signal?.level || '7-day window',
+        icon: Receipt,
+        alert: (data?.void_rate_7d ?? 0) > 5,
+      },
+      {
+        label: 'Avg prep time',
+        value: data?.avg_prep_minutes != null ? `${Number(data.avg_prep_minutes).toFixed(1)} min` : '—',
+        hint: 'Kitchen last 7 days',
+        icon: Clock3,
+      },
+    ],
+    [data, insights, range, salesTrend, fmt]
+  );
+
+  const quickLinks = [
+    { label: 'POS', href: '/admin/pos', icon: LayoutDashboard, value: data?.open_pos_sessions },
+    { label: 'Kitchen', href: '/admin/kitchen', icon: ChefHat, value: data?.total_active_orders },
+    { label: 'Orders', href: '/admin/orders', icon: ShoppingBag, value: data?.total_orders },
+    { label: 'Unpaid', href: '/admin/sales/payments', icon: Wallet, value: data?.unpaid_orders, warn: true },
+    { label: 'Inventory', href: '/admin/inventory', icon: Boxes, value: data?.low_stock_items?.length },
+    { label: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
+    { label: 'Products', href: '/admin/products', icon: Package },
+    { label: 'Users', href: '/admin/users', icon: Users },
+  ];
+
+  const greeting = user?.name ? `Welcome back, ${user.name.split(' ')[0]}` : 'Dashboard';
 
   return (
-    <div>
-      <PageHeader
-        title="Dashboard"
-        description="Sales, POS, menus, seating, inventory, and promotions at a glance."
-        action={
-          <>
-            <Link href="/admin/kitchen" className={btnSecondary}>
+    <div className="space-y-6 pb-8">
+      {occasionAlerts.length > 0 && (
+        <div className="rounded-2xl border border-amber-300/50 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+          <strong>Seasonal prep:</strong>{' '}
+          {occasionAlerts.map((a) => `${labelOf(a.name)} in ${a.days_until}d`).join(' · ')} —{' '}
+          <Link href="/admin/analytics/seasonal-readiness" className="font-semibold underline">view readiness report</Link>
+        </div>
+      )}
+      {/* Hero */}
+      <div className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-teal-600 via-teal-700 to-slate-900 px-5 py-6 text-white shadow-lg sm:px-8 sm:py-8">
+        <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+        <div className="absolute -bottom-12 -left-8 h-48 w-48 rounded-full bg-orange-400/20 blur-3xl" />
+        <div className="relative flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-teal-100/90">Operations overview</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{greeting}</h1>
+            <p className="mt-2 max-w-xl text-sm text-teal-50/80">
+              Sales, forecasts, kitchen flow, and branch performance — everything you need to run today&apos;s service.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className={`${fieldClass} border-white/20 bg-white/10 py-2 text-white backdrop-blur [&>option]:text-foreground`}
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+            >
+              <option value="daily">Today</option>
+              <option value="weekly">Last 7 days</option>
+              <option value="all">All time</option>
+            </select>
+            <Link href="/admin/kitchen" className={`${btnSecondary} !border-white/30 !bg-white/10 !text-white hover:!bg-white/20`}>
               Kitchen <ArrowUpRight className="h-4 w-4" />
             </Link>
             <Link href="/admin/pos" className={btnAccent}>
               Open POS <ArrowUpRight className="h-4 w-4" />
             </Link>
-          </>
-        }
-      />
+          </div>
+        </div>
+      </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {primaryCards.map((card, i) => {
-          const Icon = card.icon;
-          const tone = softPalette[i % softPalette.length];
-          return (
-            <Card key={card.label} className={`p-4 ring-1 ${tone.ring}`}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">{card.label}</div>
-                <div className={`rounded-xl p-2.5 ${tone.bg} ${tone.text}`}>
-                  <Icon className="h-4 w-4" />
-                </div>
-              </div>
-              <div className="mt-3 text-2xl font-bold text-foreground">{card.value}</div>
+      {loading ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={i} className="h-28 animate-pulse bg-surface-muted/50">
+              <span className="sr-only">Loading</span>
             </Card>
-          );
-        })}
-      </div>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-        {moduleCards.map((card, i) => {
-          const Icon = card.icon;
-          const tone = softPalette[i % softPalette.length];
-          return (
-            <Link key={card.label} href={card.href}>
-              <Card className={`h-full p-4 transition hover:-translate-y-0.5 hover:shadow-md ring-1 ${tone.ring}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">{card.label}</div>
-                  <div className={`rounded-lg p-2 ${tone.bg} ${tone.text}`}>
-                    <Icon className="h-3.5 w-3.5" />
-                  </div>
-                </div>
-                <div className="mt-2 text-xl font-bold text-foreground">{card.value}</div>
-              </Card>
-            </Link>
-          );
-        })}
-      </div>
-
-      <div className="mt-6 grid gap-4">
-        <Panel title="Hourly Sales Trend">
-          <MiniBars items={hourly} />
-        </Panel>
-
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Panel
-            title="Sales Analytics"
-            action={
-              <select className={`${fieldClass} w-auto py-1.5 text-xs`} value={salesRange} onChange={(e) => setSalesRange(e.target.value)}>
-                <option value="weekly">Weekly</option>
-                <option value="all">All The Time</option>
-              </select>
-            }
-          >
-            <MiniBars items={salesRange === 'weekly' ? salesAnalytics : salesAnalytics} />
-          </Panel>
-
-          <Panel
-            title="Top Selling Products"
-            action={
-              <select className={`${fieldClass} w-auto py-1.5 text-xs`} value={topRange} onChange={(e) => setTopRange(e.target.value)}>
-                <option value="all">All The Time</option>
-                <option value="weekly">Weekly</option>
-              </select>
-            }
-          >
-            {!data?.top_products?.length ? (
-              <EmptyState />
-            ) : (
-              <div className="space-y-2">
-                {data.top_products.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2">
-                    <div>
-                      <div className="text-sm font-semibold text-foreground">{labelOf(p.name)}</div>
-                      <div className="text-xs text-muted">{p.sku || '—'}</div>
-                    </div>
-                    <Badge tone="brand">{money(p.price, currency)}</Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Panel>
+          ))}
         </div>
-
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Panel title="Branch Wise Sales Comparison">
-            {!data?.branch_sales?.length ? (
-              <EmptyState />
-            ) : (
-              <MiniBars
-                items={data.branch_sales.map((b) => ({ label: labelOf(b.name), total: b.total }))}
-              />
-            )}
-          </Panel>
-          <Panel title="Best Performing Branches">
-            {!data?.branch_sales?.length ? (
-              <EmptyState />
-            ) : (
-              <div className="space-y-2">
-                {[...data.branch_sales]
-                  .sort((a, b) => b.total - a.total)
-                  .map((b, i) => (
-                    <div key={b.id} className="flex items-center justify-between rounded-xl border border-border px-3 py-2 text-sm">
-                      <span className="font-semibold text-foreground">
-                        #{i + 1} {labelOf(b.name)}
-                      </span>
-                      <span className="text-muted">
-                        {money(b.total, currency)} · {b.orders} orders
-                      </span>
+      ) : (
+        <>
+          {/* KPI row */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {kpiCards.map((card, i) => {
+              const Icon = card.icon;
+              const tone = softPalette[i % softPalette.length];
+              return (
+                <Card
+                  key={card.label}
+                  className={`relative overflow-hidden p-4 ring-1 ${tone.ring} ${card.alert ? 'border-warning/40' : ''}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className={`rounded-xl p-2 ${tone.bg} ${tone.text}`}>
+                      <Icon className="h-4 w-4" />
                     </div>
+                    {card.spark?.length ? (
+                      <div className={tone.text}>
+                        <StatSparkline data={card.spark} />
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-muted">{card.label}</div>
+                  <div className="mt-1 text-xl font-bold text-foreground tabular-nums">{card.value}</div>
+                  <div className="mt-1 text-xs text-muted">{card.hint}</div>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Main charts */}
+          <div className="grid gap-3 lg:grid-cols-5">
+            <Panel
+              className="lg:col-span-3"
+              title="Sales trend"
+              subtitle="Paid revenue — last 7 days"
+            >
+              <AreaLineChart data={salesTrend} height={130} formatValue={(n) => fmt(n)} />
+            </Panel>
+
+            <Panel className="lg:col-span-2" title="Payment mix" subtitle="By tender or payment status">
+              <DonutChart data={paymentMixData} formatValue={(n) => fmt(n)} compact />
+            </Panel>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            <Panel title="Hourly sales" subtitle="Today (2-hour buckets)">
+              <BarChart data={hourlyChart} height={130} formatValue={(n) => fmt(n)} barClass="bg-gradient-to-t from-teal-700 to-teal-500" />
+            </Panel>
+
+            <Panel
+              title="Demand forecast"
+              subtitle="Same weekday pattern — last week vs projected qty"
+              action={
+                <Link href="/admin/analytics" className="text-xs font-semibold text-brand hover:underline">
+                  Full analytics
+                </Link>
+              }
+            >
+              <ForecastBarChart data={forecastRows} />
+            </Panel>
+          </div>
+
+          {/* Insights row */}
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <Panel title="Top products" subtitle="Recently active menu items">
+              {!data?.top_products?.length ? (
+                <p className="py-8 text-center text-sm text-muted">No products yet</p>
+              ) : (
+                <ul className="space-y-2">
+                  {data.top_products.slice(0, 6).map((p, i) => (
+                    <li
+                      key={p.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5 transition hover:bg-surface-muted/50"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-xs font-bold text-brand">
+                          {i + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-foreground">{labelOf(p.name)}</div>
+                          <div className="text-xs text-muted">{p.sku || '—'}</div>
+                        </div>
+                      </div>
+                      <Badge tone="brand">{fmt(p.price)}</Badge>
+                    </li>
                   ))}
-              </div>
-            )}
-          </Panel>
-        </div>
+                </ul>
+              )}
+            </Panel>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Panel title="Order Type Distribution">
-            <MiniBars items={(data?.order_types || []).map((x) => ({ label: x.label, total: x.value }))} />
-          </Panel>
-          <Panel title="Order Total By Status">
-            <MiniBars items={(data?.order_statuses || []).map((x) => ({ label: x.label, total: x.value }))} />
-          </Panel>
-          <Panel title="Low Stock Alerts">
-            {!data?.low_stock_items?.length ? (
-              <EmptyState text="No low stock items" />
-            ) : (
-              <div className="space-y-2">
-                {data.low_stock_items.map((item) => (
-                  <div key={item.id} className="rounded-xl border border-warning/30 bg-warning-soft/40 px-3 py-2 text-sm">
-                    <div className="font-semibold text-foreground">{item.name}</div>
-                    <div className="text-xs text-muted">
-                      Qty {item.quantity} {item.unit || ''} · reorder {item.reorder_level}
+            <Panel title="Order types" subtitle="Distribution by service type">
+              <DonutChart data={orderTypeData} compact />
+            </Panel>
+
+            <Panel title="Branch performance" subtitle="Paid sales by location">
+              {!data?.branch_sales?.length ? (
+                <p className="py-8 text-center text-sm text-muted">No branch data</p>
+              ) : (
+                <ul className="space-y-2">
+                  {[...data.branch_sales]
+                    .sort((a, b) => b.total - a.total)
+                    .slice(0, 6)
+                    .map((b, i) => (
+                      <li key={b.id} className="flex items-center justify-between rounded-xl border border-border px-3 py-2 text-sm">
+                        <span className="font-medium text-foreground">
+                          <span className="text-muted">#{i + 1}</span> {labelOf(b.name)}
+                        </span>
+                        <span className="text-right text-xs">
+                          <span className="font-bold text-foreground">{fmt(b.total)}</span>
+                          <span className="text-muted"> · {b.orders} orders</span>
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </Panel>
+          </div>
+
+          {/* Alerts + quick nav */}
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Panel title="Alerts" subtitle="Items needing attention" className="lg:col-span-1">
+              <div className="space-y-3">
+                {(data?.unpaid_orders ?? 0) > 0 && (
+                  <Link
+                    href="/admin/sales/payments"
+                    className="flex items-center gap-3 rounded-xl border border-warning/30 bg-warning-soft/40 px-3 py-3 transition hover:bg-warning-soft/60"
+                  >
+                    <Wallet className="h-5 w-5 text-warning shrink-0" />
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">{data?.unpaid_orders} unpaid orders</div>
+                      <div className="text-xs text-muted">Review payments</div>
+                    </div>
+                  </Link>
+                )}
+                {data?.low_stock_items?.slice(0, 4).map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-start gap-3 rounded-xl border border-warning/25 bg-warning-soft/30 px-3 py-2.5"
+                  >
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-warning mt-0.5" />
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">{labelOf(item.name)}</div>
+                      <div className="text-xs text-muted">
+                        {item.quantity} {item.unit || ''} left · reorder at {item.reorder_level}
+                      </div>
                     </div>
                   </div>
                 ))}
+                {!data?.low_stock_items?.length && !(data?.unpaid_orders ?? 0) && (
+                  <p className="py-6 text-center text-sm text-muted">All clear — no urgent alerts</p>
+                )}
               </div>
-            )}
-          </Panel>
-          <Panel title="Payments Overview">
-            <MiniBars
-              items={(data?.payments_overview || []).map((x) => ({
-                label: `${x.label} (${money(x.amount, currency)})`,
-                total: x.value,
-              }))}
-            />
-          </Panel>
-        </div>
-      </div>
+            </Panel>
+
+            <Panel title="Quick actions" subtitle="Jump to key modules" className="lg:col-span-2">
+              <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4">
+                {quickLinks.map((link, i) => {
+                  const Icon = link.icon;
+                  const tone = softPalette[i % softPalette.length];
+                  return (
+                    <Link
+                      key={link.label}
+                      href={link.href}
+                      className={`group flex items-center gap-3 rounded-xl border border-border p-3 transition hover:-translate-y-0.5 hover:shadow-md ring-1 ${tone.ring} ${link.warn && (link.value ?? 0) > 0 ? 'border-warning/40' : ''}`}
+                    >
+                      <div className={`rounded-lg p-2 ${tone.bg} ${tone.text}`}>
+                        <Icon className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-foreground group-hover:text-brand">{link.label}</div>
+                        {link.value != null ? (
+                          <div className="text-xs text-muted tabular-nums">{link.value}</div>
+                        ) : null}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </Panel>
+          </div>
+        </>
+      )}
     </div>
   );
 }
